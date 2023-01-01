@@ -16,7 +16,9 @@ pub(crate) use self::{
 pub(crate) struct Skills {
     pub aim: Aim,
     pub aim_no_sliders: Aim,
+    pub aim_rx: Aim,
     pub speed: Speed,
+    pub speed_rx: Speed,
     pub flashlight: Flashlight,
 }
 
@@ -29,9 +31,11 @@ impl Skills {
         hit_window: f64,
     ) -> Self {
         Self {
-            aim: Aim::new(true),
-            aim_no_sliders: Aim::new(false),
-            speed: Speed::new(hit_window),
+            aim: Aim::new(true, false),
+            aim_no_sliders: Aim::new(false, false),
+            aim_rx: Aim::new(true, true),
+            speed: Speed::new(hit_window, false),
+            speed_rx: Speed::new(hit_window, true),
             flashlight: Flashlight::new(mods, radius, time_preempt, time_fade_in),
         }
     }
@@ -43,7 +47,9 @@ impl Skills {
     ) {
         <Aim as Skill>::process(&mut self.aim, curr, diff_objects);
         <Aim as Skill>::process(&mut self.aim_no_sliders, curr, diff_objects);
+        <Aim as Skill>::process(&mut self.aim_rx, curr, diff_objects);
         <Speed as Skill>::process(&mut self.speed, curr, diff_objects);
+        <Speed as Skill>::process(&mut self.speed_rx, curr, diff_objects);
         <Flashlight as Skill>::process(&mut self.flashlight, curr, diff_objects);
     }
 }

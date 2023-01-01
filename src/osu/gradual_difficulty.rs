@@ -231,7 +231,9 @@ impl Iterator for OsuGradualDifficultyAttributes {
         let Skills {
             mut aim,
             mut aim_no_sliders,
+            mut aim_rx,
             mut speed,
+            mut speed_rx,
             mut flashlight,
         } = self.skills.clone();
 

@@ -13,13 +13,14 @@ pub(crate) struct Speed {
     pub(crate) strain_peaks: Vec<f64>,
     object_strains: Vec<f64>,
     hit_window: f64,
+    with_rx: bool
 }
 
 impl Speed {
     const SKILL_MULTIPLIER: f64 = 1375.0;
     const STRAIN_DECAY_BASE: f64 = 0.3;
 
-    pub(crate) fn new(hit_window: f64) -> Self {
+    pub(crate) fn new(hit_window: f64, with_rx: bool) -> Self {
         Self {
             curr_strain: 0.0,
             curr_section_peak: 0.0,
@@ -28,6 +29,7 @@ impl Speed {
             strain_peaks: Vec::new(),
             object_strains: Vec::new(),
             hit_window,
+            with_rx
         }
     }
 
@@ -88,7 +90,7 @@ impl StrainSkill for Speed {
         diff_objects: &[OsuDifficultyObject<'_>],
     ) -> f64 {
         self.curr_strain *= Self::strain_decay(curr.strain_time);
-        self.curr_strain += SpeedEvaluator::evaluate_diff_of(curr, diff_objects, self.hit_window)
+        self.curr_strain += SpeedEvaluator::evaluate_diff_of(curr, diff_objects, self.hit_window, self.with_rx)
             * Self::SKILL_MULTIPLIER;
         self.curr_rhythm = RhythmEvaluator::evaluate_diff_of(curr, diff_objects, self.hit_window);
 
@@ -131,6 +133,7 @@ impl SpeedEvaluator {
         curr: &OsuDifficultyObject<'_>,
         diff_objects: &[OsuDifficultyObject<'_>],
         hit_window: f64,
+        with_rx: bool
     ) -> f64 {
         if curr.base.is_spinner() {
             return 0.0;

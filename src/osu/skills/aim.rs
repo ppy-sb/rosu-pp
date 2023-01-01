@@ -11,19 +11,21 @@ pub(crate) struct Aim {
     curr_section_end: f64,
     pub(crate) strain_peaks: Vec<f64>,
     with_sliders: bool,
+    with_rx: bool
 }
 
 impl Aim {
     const SKILL_MULTIPLIER: f64 = 23.55;
     const STRAIN_DECAY_BASE: f64 = 0.15;
 
-    pub(crate) fn new(with_sliders: bool) -> Self {
+    pub(crate) fn new(with_sliders: bool, with_rx: bool) -> Self {
         Self {
             curr_strain: 0.0,
             curr_section_peak: 0.0,
             curr_section_end: 0.0,
             strain_peaks: Vec::new(),
             with_sliders,
+            with_rx,
         }
     }
 
@@ -71,7 +73,7 @@ impl StrainSkill for Aim {
         diff_objects: &[OsuDifficultyObject<'_>],
     ) -> f64 {
         self.curr_strain *= Self::strain_decay(curr.delta_time);
-        self.curr_strain += AimEvaluator::evaluate_diff_of(curr, diff_objects, self.with_sliders)
+        self.curr_strain += AimEvaluator::evaluate_diff_of(curr, diff_objects, self.with_sliders, self.with_rx)
             * Self::SKILL_MULTIPLIER;
 
         self.curr_strain
@@ -107,6 +109,7 @@ impl AimEvaluator {
         curr: &OsuDifficultyObject<'_>,
         diff_objects: &[OsuDifficultyObject<'_>],
         with_sliders: bool,
+        with_rx: bool,
     ) -> f64 {
         let osu_curr_obj = curr;
 

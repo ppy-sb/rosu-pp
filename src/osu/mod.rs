@@ -119,7 +119,9 @@ impl<'map> OsuStars<'map> {
         let Skills {
             mut aim,
             mut aim_no_sliders,
+            mut aim_rx,
             mut speed,
+            mut speed_rx,
             mut flashlight,
         } = skills;
 
@@ -186,15 +188,19 @@ impl<'map> OsuStars<'map> {
         let Skills {
             aim,
             aim_no_sliders,
+            aim_rx,
             speed,
+            speed_rx,
             flashlight,
         } = skills;
 
         OsuStrains {
             section_len: SECTION_LEN,
             aim: aim.strain_peaks,
+            aim_rx: aim_rx.strain_peaks,
             aim_no_sliders: aim_no_sliders.strain_peaks,
             speed: speed.strain_peaks,
+            speed_rx: speed_rx.strain_peaks,
             flashlight: flashlight.strain_peaks,
         }
     }
@@ -210,8 +216,12 @@ pub struct OsuStrains {
     pub aim: Vec<f64>,
     /// Strain peaks of the aim skill without sliders.
     pub aim_no_sliders: Vec<f64>,
+    /// Strain peaks of the aim rx skill.
+    pub aim_rx: Vec<f64>,
     /// Strain peaks of the speed skill.
     pub speed: Vec<f64>,
+    /// Strain peaks of the speed rx skill.
+    pub speed_rx: Vec<f64>,
     /// Strain peaks of the flashlight skill.
     pub flashlight: Vec<f64>,
 }
