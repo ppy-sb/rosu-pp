@@ -229,20 +229,23 @@ impl Iterator for OsuGradualDifficultyAttributes {
         Self::increment_combo(curr.base, &mut self.attrs);
 
         let Skills {
-            mut aim,
+            aim,
             mut aim_no_sliders,
-            mut aim_rx,
-            mut speed,
-            mut speed_rx,
+            aim_rx,
+            speed,
+            speed_rx,
             mut flashlight,
         } = self.skills.clone();
 
-        let mut aim_rating = aim.difficulty_value().sqrt() * DIFFICULTY_MULTIPLIER;
+        let mut current_aim = if self.mods.rx() { aim_rx } else { aim };
+        let mut current_speed = if self.mods.rx() { speed_rx } else { speed };
+
+        let mut aim_rating = current_aim.difficulty_value().sqrt() * DIFFICULTY_MULTIPLIER;
         let aim_rating_no_sliders =
             aim_no_sliders.difficulty_value().sqrt() * DIFFICULTY_MULTIPLIER;
 
-        let speed_notes = speed.relevant_note_count();
-        let speed_rating = speed.difficulty_value().sqrt() * DIFFICULTY_MULTIPLIER;
+        let speed_notes = current_speed.relevant_note_count();
+        let speed_rating = current_speed.difficulty_value().sqrt() * DIFFICULTY_MULTIPLIER;
 
         let mut flashlight_rating = flashlight.difficulty_value().sqrt() * DIFFICULTY_MULTIPLIER;
 

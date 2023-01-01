@@ -139,6 +139,10 @@ impl SpeedEvaluator {
             return 0.0;
         }
 
+        if with_rx {
+            return 0.0; //TODO... Implement rx formular
+        }
+
         // * derive strainTime for calculation
         let osu_curr_obj = curr;
         let osu_prev_obj = previous(diff_objects, curr.idx, 0);
