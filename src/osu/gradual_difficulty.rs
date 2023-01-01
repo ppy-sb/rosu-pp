@@ -240,7 +240,7 @@ impl Iterator for OsuGradualDifficultyAttributes {
             aim_no_sliders.difficulty_value().sqrt() * DIFFICULTY_MULTIPLIER;
 
         let speed_notes = speed.relevant_note_count();
-        let mut speed_rating = speed.difficulty_value().sqrt() * DIFFICULTY_MULTIPLIER;
+        let speed_rating = speed.difficulty_value().sqrt() * DIFFICULTY_MULTIPLIER;
 
         let mut flashlight_rating = flashlight.difficulty_value().sqrt() * DIFFICULTY_MULTIPLIER;
 
@@ -253,12 +253,6 @@ impl Iterator for OsuGradualDifficultyAttributes {
         if self.mods.td() {
             aim_rating = aim_rating.powf(0.8);
             flashlight_rating = flashlight_rating.powf(0.8);
-        }
-
-        if self.mods.rx() {
-            aim_rating *= 0.9;
-            speed_rating = 0.0;
-            flashlight_rating *= 0.7;
         }
 
         let base_aim_performance = (5.0 * (aim_rating / 0.0675).max(1.0) - 4.0).powi(3) / 100_000.0;
