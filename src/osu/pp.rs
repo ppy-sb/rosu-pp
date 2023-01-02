@@ -427,9 +427,9 @@ impl OsuPpInner {
 
                 aim_value *= depression_factor;
             }
-            let stream_factor = aim_value / speed_value;
-            // Stream is the main part of the beatmap(<=0.4 -> 0.9, >=0.6 -> 1)
+            // Stream is the main part of the beatmap
             let nerf_factor = (1.25 * stream_factor.powf(0.45)).min(0.85).max(1.0);
+            let stream_factor = aim_value / speed_value;
             aim_value *= nerf_factor;
 
             // Too many streams which means easy to gain acc pp
