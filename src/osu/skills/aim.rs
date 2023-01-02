@@ -111,9 +111,9 @@ impl AimEvaluator {
         with_sliders: bool,
         with_rx: bool,
     ) -> f64 {
-        if with_rx {
-            
-        }
+        let wide_angle_multiplier = if with_rx { Self::WIDE_ANGLE_MULTIPLIER * 1.1 } else { Self::WIDE_ANGLE_MULTIPLIER };
+        let slider_multiplier = if with_rx { Self::SLIDER_MULTIPLIER * 1.2 } else { Self::SLIDER_MULTIPLIER };
+        let velocity_multiplier = if with_rx{ Self::VELOCITY_CHANGE_MULTIPLIER * 1.1 } else { Self::VELOCITY_CHANGE_MULTIPLIER } ; 
 
         let osu_curr_obj = curr;
 
@@ -246,13 +246,13 @@ impl AimEvaluator {
 
         // * Add in acute angle bonus or wide angle bonus + velocity change bonus, whichever is larger.
         aim_strain += (acute_angle_bonus * Self::ACUTE_ANGLE_MULTIPLIER).max(
-            wide_angle_bonus * Self::WIDE_ANGLE_MULTIPLIER
-                + vel_change_bonus * Self::VELOCITY_CHANGE_MULTIPLIER,
+            wide_angle_bonus * wide_angle_multiplier
+                + vel_change_bonus * velocity_multiplier,
         );
 
         // * Add in additional slider velocity bonus.
         if with_sliders {
-            aim_strain += slider_bonus * Self::SLIDER_MULTIPLIER;
+            aim_strain += slider_bonus * slider_multiplier;
         }
 
         aim_strain
