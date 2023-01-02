@@ -9,6 +9,8 @@ pub(crate) struct Aim {
     curr_strain: f64,
     curr_section_peak: f64,
     curr_section_end: f64,
+    curr_rhythm: f64,
+    hit_window: f64,
     pub(crate) strain_peaks: Vec<f64>,
     with_sliders: bool,
     with_rx: bool
@@ -18,14 +20,16 @@ impl Aim {
     const SKILL_MULTIPLIER: f64 = 23.55;
     const STRAIN_DECAY_BASE: f64 = 0.15;
 
-    pub(crate) fn new(with_sliders: bool, with_rx: bool) -> Self {
+    pub(crate) fn new(with_sliders: bool, with_rx: bool, hit_window: f64) -> Self {
         Self {
             curr_strain: 0.0,
             curr_section_peak: 0.0,
             curr_section_end: 0.0,
+            curr_rhythm: 0.0,
             strain_peaks: Vec::new(),
             with_sliders,
             with_rx,
+            hit_window
         }
     }
 
@@ -75,8 +79,11 @@ impl StrainSkill for Aim {
         self.curr_strain *= Self::strain_decay(curr.delta_time);
         self.curr_strain += AimEvaluator::evaluate_diff_of(curr, diff_objects, self.with_sliders, self.with_rx)
             * Self::SKILL_MULTIPLIER;
+        self.curr_rhythm = RhythmEvaluator::evaluate_diff_of(curr, diff_objects, self.hit_window);
 
-        self.curr_strain
+        let total_strain = self.curr_strain * self.curr_rhythm.min(1.0);
+
+        total_strain
     }
 
     #[inline]
@@ -266,5 +273,149 @@ impl AimEvaluator {
 
     fn calc_acute_angle_bonus(angle: f64) -> f64 {
         1.0 - Self::calc_wide_angle_bonus(angle)
+    }
+}
+
+struct RhythmEvaluator;
+
+impl RhythmEvaluator {
+    // * 5 seconds of calculatingRhythmBonus max.
+    const HISTORY_TIME_MAX: u32 = 5000;
+    const RHYTHM_MULTIPLIER: f64 = 0.75;
+
+    fn evaluate_diff_of(
+        curr: &OsuDifficultyObject<'_>,
+        diff_objects: &[OsuDifficultyObject<'_>],
+        hit_window: f64,
+    ) -> f64 {
+        if curr.base.is_spinner() {
+            return 0.0;
+        }
+
+        let mut prev_island_size = 0;
+
+        let mut rhythm_complexity_sum = 0.0;
+        let mut island_size = 1;
+        // * store the ratio of the current start of an island to buff for tighter rhythms
+        let mut start_ratio = 0.0;
+
+        let mut first_delta_switch = false;
+
+        let historical_note_count = curr.idx.min(32);
+
+        let mut rhythm_start = 0;
+
+        while previous(diff_objects, curr.idx, rhythm_start)
+            .filter(|prev| {
+                rhythm_start + 2 < historical_note_count
+                    && curr.start_time - prev.start_time < Self::HISTORY_TIME_MAX as f64
+            })
+            .is_some()
+        {
+            rhythm_start += 1;
+        }
+
+        for i in (1..=rhythm_start).rev() {
+            let (curr_obj, prev_obj, last_obj) = if let Some(((curr, prev), last)) =
+                previous(diff_objects, curr.idx, i - 1)
+                    .zip(previous(diff_objects, curr.idx, i))
+                    .zip(previous(diff_objects, curr.idx, i + 1))
+            {
+                (curr, prev, last)
+            } else {
+                break;
+            };
+
+            // * scales note 0 to 1 from history to now
+            let mut curr_historical_decay = (Self::HISTORY_TIME_MAX as f64
+                - (curr.start_time - curr_obj.start_time))
+                / Self::HISTORY_TIME_MAX as f64;
+
+            // * either we're limited by time or limited by object count.
+            curr_historical_decay = curr_historical_decay
+                .min((historical_note_count - i) as f64 / historical_note_count as f64);
+
+            let curr_delta = curr_obj.strain_time;
+            let prev_delta = prev_obj.strain_time;
+            let last_delta = last_obj.strain_time;
+
+            // * fancy function to calculate rhythmbonuses.
+            let base = (PI / (prev_delta.min(curr_delta) / prev_delta.max(curr_delta))).sin();
+            let curr_ratio = 1.0 + 6.0 * (base * base).min(0.5);
+
+            let hit_window = !curr_obj.base.is_spinner() as u64 as f64 * hit_window;
+
+            let mut window_penalty = ((((prev_delta - curr_delta).abs() - hit_window * 0.3)
+                .max(0.0))
+                / (hit_window * 0.3))
+                .min(1.0);
+
+            window_penalty = window_penalty.min(1.0);
+
+            let mut effective_ratio = window_penalty * curr_ratio;
+
+            if first_delta_switch {
+                if !(prev_delta > 1.25 * curr_delta || prev_delta * 1.25 < curr_delta) {
+                    if island_size < 7 {
+                        // * island is still progressing, count size.
+                        island_size += 1;
+                    }
+                } else {
+                    // * bpm change is into slider, this is easy acc window
+                    if curr_obj.base.is_slider() {
+                        effective_ratio *= 0.125;
+                    }
+
+                    // * bpm change was from a slider, this is easier typically than circle -> circle
+                    if prev_obj.base.is_slider() {
+                        effective_ratio *= 0.25;
+                    }
+
+                    // * repeated island size (ex: triplet -> triplet)
+                    if prev_island_size == island_size {
+                        effective_ratio *= 0.25;
+                    }
+
+                    // * repeated island polartiy (2 -> 4, 3 -> 5)
+                    if prev_island_size % 2 == island_size % 2 {
+                        effective_ratio *= 0.5;
+                    }
+
+                    // * previous increase happened a note ago, 1/1->1/2-1/4, dont want to buff this.
+                    if last_delta > prev_delta + 10.0 && prev_delta > curr_delta + 10.0 {
+                        effective_ratio *= 0.125;
+                    }
+
+                    rhythm_complexity_sum += (effective_ratio * start_ratio).sqrt()
+                        * curr_historical_decay
+                        * ((4 + island_size) as f64).sqrt()
+                        / 2.0
+                        * ((4 + prev_island_size) as f64).sqrt()
+                        / 2.0;
+
+                    start_ratio = effective_ratio;
+
+                    // * log the last island size.
+                    prev_island_size = island_size;
+
+                    // * we're slowing down, stop counting
+                    if prev_delta * 1.25 < curr_delta {
+                        // * if we're speeding up, this stays true and  we keep counting island size.
+                        first_delta_switch = false;
+                    }
+
+                    island_size = 1;
+                }
+            } else if prev_delta > 1.25 * curr_delta {
+                // * we want to be speeding up.
+                // * Begin counting island until we change speed again.
+                first_delta_switch = true;
+                start_ratio = effective_ratio;
+                island_size = 1;
+            }
+        }
+
+        // * produces multiplier that can be applied to strain. range [1, infinity) (not really though)
+        (4.0 + rhythm_complexity_sum * Self::RHYTHM_MULTIPLIER).sqrt() / 2.0
     }
 }

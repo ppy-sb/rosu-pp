@@ -31,9 +31,9 @@ impl Skills {
         hit_window: f64,
     ) -> Self {
         Self {
-            aim: Aim::new(true, false),
-            aim_no_sliders: Aim::new(false, false),
-            aim_rx: Aim::new(true, true),
+            aim: Aim::new(true, false, hit_window),
+            aim_no_sliders: Aim::new(false, false, hit_window),
+            aim_rx: Aim::new(true, true, hit_window),
             speed: Speed::new(hit_window, false),
             speed_rx: Speed::new(hit_window, true),
             flashlight: Flashlight::new(mods, radius, time_preempt, time_fade_in),

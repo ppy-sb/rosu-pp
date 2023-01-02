@@ -415,12 +415,20 @@ impl OsuPpInner {
         let acc_value = self.compute_accuracy_value();
         let flashlight_value = self.compute_flashlight_value();
 
-        let pp = (aim_value.powf(1.1)
+        let pp = if self.mods.rx() {
+            (aim_value.powf(1.17) + acc_value.powf(1.05) + flashlight_value.powf(1.1))
+                .powf(1.0 / 1.1)
+                * multiplier
+        } else if self.mods.ap() {
+            (speed_value.powf(1.12) + acc_value.powf(1.12) + flashlight_value.powf(1.05)).powf(1.0 / 1.1) * multiplier
+        } else {
+            (aim_value.powf(1.1)
             + speed_value.powf(1.1)
             + acc_value.powf(1.1)
             + flashlight_value.powf(1.1))
         .powf(1.0 / 1.1)
-            * multiplier;
+            * multiplier
+        };
 
         OsuPerformanceAttributes {
             difficulty: self.attrs,
