@@ -89,17 +89,16 @@ impl StrainSkill for Speed {
         curr: &OsuDifficultyObject<'_>,
         diff_objects: &[OsuDifficultyObject<'_>],
     ) -> f64 {
-        self.curr_strain *= Self::strain_decay(curr.strain_time);
-        self.curr_strain += SpeedEvaluator::evaluate_diff_of(curr, diff_objects, self.hit_window, self.with_rx)
-            * Self::SKILL_MULTIPLIER;
+        if !self.with_rx {
+            self.curr_strain *= Self::strain_decay(curr.strain_time);
+            self.curr_strain += SpeedEvaluator::evaluate_diff_of(curr, diff_objects, self.hit_window)
+                * Self::SKILL_MULTIPLIER;
+        } else {
+            self.curr_strain = 1.0
+        }
         self.curr_rhythm = RhythmEvaluator::evaluate_diff_of(curr, diff_objects, self.hit_window);
 
-
-        let speed_factor = if self.with_rx { 0.8 } else { 1.0 };
-        let rhythm_factor = if self.with_rx { 1.05 } else { 1.0 };
-        
-        // Relax: Rhythm bouns, speed nerf
-        let total_strain = self.curr_strain.powf(speed_factor) * self.curr_rhythm.powf(rhythm_factor);
+        let total_strain = self.curr_strain * self.curr_rhythm;
         self.object_strains.push(total_strain);
 
         total_strain
@@ -138,18 +137,10 @@ impl SpeedEvaluator {
         curr: &OsuDifficultyObject<'_>,
         diff_objects: &[OsuDifficultyObject<'_>],
         hit_window: f64,
-        with_rx: bool
     ) -> f64 {
         if curr.base.is_spinner() {
             return 0.0;
         }
-
-        // Relax: 240BPM, Vanilla: 200BPM
-        let speed_bonus = if with_rx { 1.2 * Self::MIN_SPEED_BONUS } else { Self::MIN_SPEED_BONUS };
-        // Relax: More strict speed factor
-        let balancing_factor = if with_rx { 1.2 * Self::SPEED_BALANCING_FACTOR } else { Self::SPEED_BALANCING_FACTOR };
-        // 
-        let single_spacing_threshold = if with_rx { 1.2 * Self::SINGLE_SPACING_THRESHOLD } else { Self::SINGLE_SPACING_THRESHOLD };
 
         // * derive strainTime for calculation
         let osu_curr_obj = curr;
@@ -170,17 +161,13 @@ impl SpeedEvaluator {
             doubletapness = speed_ratio.powf(1.0 - window_ratio);
         }
 
-        // Relax: Make it harder to apply the loose
-        let strain_min = if with_rx { 0.93 } else { 0.92 };
-        let strain_divisor = if with_rx { 0.94 } else { 0.93 };
         // * Cap deltatime to the OD 300 hitwindow.
         // * 0.93 is derived from making sure 260bpm OD8 streams aren't nerfed harshly, whilst 0.92 limits the effect of the cap.
-        strain_time /= ((strain_time / hit_window) / strain_divisor).clamp(strain_min, 1.0);
-        
+        strain_time /= ((strain_time / hit_window) / 0.93).clamp(0.92, 1.0);
 
         // * derive speedBonus for calculation
-        let speed_bonus = if strain_time < speed_bonus {
-            let base = (speed_bonus - strain_time) / balancing_factor;
+        let speed_bonus = if strain_time < Self::MIN_SPEED_BONUS {
+            let base = (Self::MIN_SPEED_BONUS - strain_time) / Self::SPEED_BALANCING_FACTOR;
 
             1.0 + 0.75 * base * base
         } else {
@@ -189,9 +176,9 @@ impl SpeedEvaluator {
 
         let travel_dist = osu_prev_obj.map_or(0.0, |obj| obj.dists.travel_dist);
         let dist =
-            single_spacing_threshold.min(travel_dist + osu_curr_obj.dists.min_jump_dist);
+            Self::SINGLE_SPACING_THRESHOLD.min(travel_dist + osu_curr_obj.dists.min_jump_dist);
 
-        (speed_bonus + speed_bonus * (dist / single_spacing_threshold).powf(3.5))
+        (speed_bonus + speed_bonus * (dist / Self::SINGLE_SPACING_THRESHOLD).powf(3.5))
             * doubletapness
             / strain_time
     }
