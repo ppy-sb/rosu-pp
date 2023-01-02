@@ -427,9 +427,9 @@ impl OsuPpInner {
 
                 aim_value *= depression_factor;
             }
-            
+
             aim_value *= (1.32 * stream_factor.powf(0.53)).clamp(0.8, 1.0);
-            acc_value *= (1.34 * stream_factor.powf(0.53)).clamp(0.8, 1.0);
+            acc_value *= (stream_factor + 0.4).clamp(0.8, 1.0);
         }
 
         let pp = if self.mods.rx() {
