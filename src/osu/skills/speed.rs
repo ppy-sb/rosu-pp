@@ -90,11 +90,11 @@ impl StrainSkill for Speed {
         diff_objects: &[OsuDifficultyObject<'_>],
     ) -> f64 {
         self.curr_strain *= Self::strain_decay(curr.strain_time);
-            self.curr_strain += SpeedEvaluator::evaluate_diff_of(curr, diff_objects, self.hit_window)
+            self.curr_strain += SpeedEvaluator::evaluate_diff_of(curr, diff_objects, self.hit_window, self.with_rx)
                 * Self::SKILL_MULTIPLIER;
         self.curr_rhythm = RhythmEvaluator::evaluate_diff_of(curr, diff_objects, self.hit_window);
 
-        let total_strain = if self.with_rx { 0.0 } else { self.curr_strain * self.curr_rhythm };
+        let total_strain = self.curr_strain * self.curr_rhythm;
         self.object_strains.push(total_strain);
 
         total_strain
@@ -133,8 +133,13 @@ impl SpeedEvaluator {
         curr: &OsuDifficultyObject<'_>,
         diff_objects: &[OsuDifficultyObject<'_>],
         hit_window: f64,
+        with_rx: bool
     ) -> f64 {
         if curr.base.is_spinner() {
+            return 0.0;
+        }
+
+        if with_rx {
             return 0.0;
         }
 
