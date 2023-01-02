@@ -438,36 +438,44 @@ impl OsuPpInner {
 
         let total_hits = self.total_hits();
 
-        let len_bonus = 0.95
+        let bonus_factor = if self.mods.rx() { 0.88 } else { 0.95 };
+        let len_bonus = bonus_factor
             + 0.4 * (total_hits / 2000.0).min(1.0)
             + (total_hits > 2000.0) as u8 as f64 * (total_hits / 2000.0).log10() * 0.5;
 
         aim_value *= len_bonus;
 
-        // * Penalize misses by assessing # of misses relative to the total # of objects.
-        // * Default a 3% reduction for any # of misses.
         if self.effective_miss_count > 0.0 {
-            aim_value *= 0.97
+            if self.mods.rx() {
+                let miss_penalty = self.calculate_relax_miss_penalty(self.effective_miss_count as f32) as f64;
+                aim_value *= miss_penalty
+            } else {
+                aim_value *= 0.97
                 * (1.0 - (self.effective_miss_count / total_hits).powf(0.775))
                     .powf(self.effective_miss_count);
+            }
         }
 
         aim_value *= self.get_combo_scaling_factor();
 
-        let ar_factor = if self.attrs.ar > 10.33 {
+        let mut ar_factor = if self.attrs.ar > 10.33 {
             0.3 * (self.attrs.ar - 10.33)
-        } else if self.attrs.ar < 8.0 {
-            0.05 * (8.0 - self.attrs.ar)
         } else {
             0.0
         };
+
+        if self.attrs.ar < 8.0 {
+            ar_factor = if self.mods.rx() {0.025 * (8.0 - self.attrs.ar)} else {0.05 * (8.0 - self.attrs.ar)};
+        }
 
         // * Buff for longer maps with high AR.
         aim_value *= 1.0 + ar_factor * len_bonus;
 
         if self.mods.hd() {
-            // * We want to give more reward for lower AR when it comes to aim and HD. This nerfs high AR and buffs lower AR.
-            aim_value *= 1.0 + 0.04 * (12.0 - self.attrs.ar);
+            aim_value *= match self.mods.rx() {
+                true => 1.0 + 0.05 * (11.0 - self.attrs.ar) as f64,
+                false => 1.0 + 0.04 * (12.0 - self.attrs.ar) as f64,
+            }
         }
 
         // * We assume 15% of sliders in a map are difficult since there's no way to tell from the performance calculator.
@@ -485,7 +493,7 @@ impl OsuPpInner {
             aim_value *= slider_nerf_factor;
         }
 
-        aim_value *= self.acc;
+        aim_value *= if self.mods.rx() {0.3 + self.acc / 2.0 } else {self.acc};
         // * It is important to consider accuracy difficulty when scaling with accuracy.
         aim_value *= 0.98 + self.attrs.od * self.attrs.od / 2500.0;
 
@@ -498,18 +506,22 @@ impl OsuPpInner {
 
         let total_hits = self.total_hits();
 
-        let len_bonus = 0.95
+        let bonus_factor = if self.mods.rx() { 0.88 } else { 0.95 };
+        let len_bonus = bonus_factor
             + 0.4 * (total_hits / 2000.0).min(1.0)
             + (total_hits > 2000.0) as u8 as f64 * (total_hits / 2000.0).log10() * 0.5;
 
         speed_value *= len_bonus;
 
-        // * Penalize misses by assessing # of misses relative to the total # of objects.
-        // * Default a 3% reduction for any # of misses.
         if self.effective_miss_count > 0.0 {
-            speed_value *= 0.97
+            if self.mods.rx() {
+                let miss_penalty = self.calculate_relax_miss_penalty(self.effective_miss_count as f32) as f64;
+                speed_value *= miss_penalty
+            } else {
+                speed_value *= 0.97
                 * (1.0 - (self.effective_miss_count / total_hits).powf(0.775))
-                    .powf(self.effective_miss_count.powf(0.875));
+                    .powf(self.effective_miss_count);
+            }
         }
 
         speed_value *= self.get_combo_scaling_factor();
@@ -524,9 +536,10 @@ impl OsuPpInner {
         speed_value *= 1.0 + ar_factor * len_bonus;
 
         if self.mods.hd() {
-            // * We want to give more reward for lower AR when it comes to aim and HD.
-            // * This nerfs high AR and buffs lower AR.
-            speed_value *= 1.0 + 0.04 * (12.0 - self.attrs.ar);
+            speed_value *= match self.mods.rx() {
+                true => 1.0 + 0.05 * (11.0 - self.attrs.ar) as f64,
+                false => 1.0 + 0.04 * (12.0 - self.attrs.ar) as f64,
+            }
         }
 
         // * Calculate accuracy assuming the worst case scenario
@@ -641,6 +654,12 @@ impl OsuPpInner {
 
     fn total_hits(&self) -> f64 {
         self.state.total_hits() as f64
+    }
+
+    fn calculate_relax_miss_penalty(&self, effective_miss_count: f32) -> f32 {
+        let total_hits = self.total_hits() as f32;
+        
+        0.97 * (1.0 - (effective_miss_count / total_hits).powf(0.5)).powf(1.0 + (effective_miss_count / 1.5))
     }
 }
 

@@ -112,7 +112,7 @@ impl AimEvaluator {
         with_rx: bool,
     ) -> f64 {
         if with_rx {
-            return 0.0; //TODO... Implement rx formular
+            
         }
 
         let osu_curr_obj = curr;

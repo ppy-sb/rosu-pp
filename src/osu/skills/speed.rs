@@ -140,7 +140,6 @@ impl SpeedEvaluator {
         }
 
         if with_rx {
-            return 0.0; //TODO... Implement rx formular
         }
 
         // * derive strainTime for calculation
