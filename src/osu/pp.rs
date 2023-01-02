@@ -412,7 +412,7 @@ impl OsuPpInner {
 
         let mut aim_value = self.compute_aim_value();
         let speed_value = self.compute_speed_value();
-        let acc_value = self.compute_accuracy_value();
+        let mut acc_value = self.compute_accuracy_value();
         let flashlight_value = self.compute_flashlight_value();
 
         if self.mods.rx() {
@@ -426,6 +426,14 @@ impl OsuPpInner {
                 };
 
                 aim_value *= depression_factor;
+            }
+            // Stream is the main part of the beatmap(<=0.4 -> 0.9, >=0.6 -> 1)
+            let nerf_factor = (stream_factor * 0.5 + 0.7).max(1.0).min(0.9);
+            aim_value *= nerf_factor;
+
+            // Too many streams which means easy to gain acc pp
+            if stream_factor < 0.5 {
+                acc_value *= 0.96
             }
         }
 
