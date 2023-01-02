@@ -416,7 +416,7 @@ impl OsuPpInner {
         let flashlight_value = self.compute_flashlight_value();
 
         let pp = if self.mods.rx() {
-            (aim_value.powf(1.12) + acc_value.powf(1.06) + flashlight_value.powf(1.1))
+            (aim_value.powf(1.14) + acc_value.powf(1.08) + flashlight_value.powf(1.1))
                 .powf(1.0 / 1.1)
                 * multiplier
         } else if self.mods.ap() {
