@@ -433,7 +433,7 @@ impl OsuPpInner {
 
             // Too many streams which means easy to gain acc pp
             if stream_factor < 0.5 {
-                acc_value *= 0.96
+                acc_value *= 0.9
             }
         }
 
@@ -441,6 +441,7 @@ impl OsuPpInner {
             (aim_value.powf(1.18) + acc_value.powf(1.12) + flashlight_value.powf(1.1))
                 .powf(1.0 / 1.1)
                 * multiplier
+                * 1.1 //Nobody want to see their pp dropped
         } else if self.mods.ap() {
             (speed_value.powf(1.12) + acc_value.powf(1.12) + flashlight_value.powf(1.05)).powf(1.0 / 1.1) * multiplier
         } else {
