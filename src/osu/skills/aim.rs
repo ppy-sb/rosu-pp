@@ -81,7 +81,7 @@ impl StrainSkill for Aim {
             * Self::SKILL_MULTIPLIER;
         self.curr_rhythm = RhythmEvaluator::evaluate_diff_of(curr, diff_objects, self.hit_window);
 
-        let total_strain = self.curr_strain * self.curr_rhythm.powf(2.0).max(2.0).min(1.0);
+        let total_strain = self.curr_strain * self.curr_rhythm.powf(2.5).max(2.0).min(1.0);
 
         total_strain
     }
@@ -120,7 +120,7 @@ impl AimEvaluator {
     ) -> f64 {
         let acute_angle_multiplier = if with_rx { Self::ACUTE_ANGLE_MULTIPLIER * 1.4 } else { Self::ACUTE_ANGLE_MULTIPLIER };
         let wide_angle_multiplier = if with_rx { Self::WIDE_ANGLE_MULTIPLIER * 1.2 } else { Self::WIDE_ANGLE_MULTIPLIER };
-        let slider_multiplier = if with_rx { Self::SLIDER_MULTIPLIER * 1.6 } else { Self::SLIDER_MULTIPLIER };
+        let slider_multiplier = if with_rx { Self::SLIDER_MULTIPLIER * 1.8 } else { Self::SLIDER_MULTIPLIER };
         let velocity_multiplier = if with_rx{ Self::VELOCITY_CHANGE_MULTIPLIER * 1.3 } else { Self::VELOCITY_CHANGE_MULTIPLIER }; 
 
         let osu_curr_obj = curr;
