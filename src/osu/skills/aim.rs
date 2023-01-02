@@ -122,7 +122,7 @@ impl AimEvaluator {
     ) -> f64 {
         let acute_angle_multiplier = if with_rx { Self::ACUTE_ANGLE_MULTIPLIER * 1.5 } else { Self::ACUTE_ANGLE_MULTIPLIER };
         let wide_angle_multiplier = if with_rx { Self::WIDE_ANGLE_MULTIPLIER * 1.5 } else { Self::WIDE_ANGLE_MULTIPLIER };
-        let slider_multiplier = if with_rx { Self::SLIDER_MULTIPLIER * 3.0 } else { Self::SLIDER_MULTIPLIER };
+        let slider_multiplier = if with_rx { Self::SLIDER_MULTIPLIER * 3 } else { Self::SLIDER_MULTIPLIER };
         let velocity_multiplier = if with_rx{ Self::VELOCITY_CHANGE_MULTIPLIER * 1.5 } else { Self::VELOCITY_CHANGE_MULTIPLIER }; 
 
         let osu_curr_obj = curr;
