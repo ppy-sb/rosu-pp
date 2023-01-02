@@ -427,13 +427,9 @@ impl OsuPpInner {
 
                 aim_value *= depression_factor;
             }
-            aim_value *= (1.32 * stream_factor.powf(0.53)).clamp(0.82, 1.0);
-            acc_value *= (1.14 * stream_factor.powf(0.26)).clamp(0.9, 1.0);
-
-            // Too many streams which means easy to gain acc pp
-            if stream_factor < 0.5 {
-                acc_value *= 0.9
-            }
+            
+            aim_value *= (1.32 * stream_factor.powf(0.53)).clamp(0.8, 1.0);
+            acc_value *= (1.34 * stream_factor.powf(0.53)).clamp(0.8, 1.0);
         }
 
         let pp = if self.mods.rx() {
