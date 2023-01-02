@@ -94,13 +94,6 @@ impl StrainSkill for Speed {
                 * Self::SKILL_MULTIPLIER;
         self.curr_rhythm = RhythmEvaluator::evaluate_diff_of(curr, diff_objects, self.hit_window);
 
-        //Relax: Return rhythm factor to debug
-        if self.with_rx {
-            let rhythm = self.curr_rhythm.powf(1.8).max(2.0).min(1.0);
-            self.object_strains.push(rhythm);
-            return rhythm; 
-        }
-
         let total_strain = self.curr_strain * self.curr_rhythm;
         self.object_strains.push(total_strain);
 
