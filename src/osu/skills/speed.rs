@@ -95,7 +95,7 @@ impl StrainSkill for Speed {
         self.curr_rhythm = RhythmEvaluator::evaluate_diff_of(curr, diff_objects, self.hit_window);
 
 
-        let speed_factor = if self.with_rx { 0.97 } else { 1.0 };
+        let speed_factor = if self.with_rx { 0.8 } else { 1.0 };
         let rhythm_factor = if self.with_rx { 1.05 } else { 1.0 };
         
         // Relax: Rhythm bouns, speed nerf

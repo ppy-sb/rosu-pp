@@ -506,7 +506,7 @@ impl OsuPpInner {
 
         let total_hits = self.total_hits();
 
-        let bonus_factor = if self.mods.rx() { 0.88 } else { 0.95 };
+        let bonus_factor = if self.mods.rx() { 0.84 } else { 0.95 };
         let len_bonus = bonus_factor
             + 0.4 * (total_hits / 2000.0).min(1.0)
             + (total_hits > 2000.0) as u8 as f64 * (total_hits / 2000.0).log10() * 0.5;
