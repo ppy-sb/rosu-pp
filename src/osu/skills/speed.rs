@@ -168,13 +168,16 @@ impl SpeedEvaluator {
             doubletapness = speed_ratio.powf(1.0 - window_ratio);
         }
 
+        // (180, 0.8) (200, 0.9) (220, 0.92) (240, 1)
+        let relax_low_speed_nerf = if with_rx {0.65 * strain_time.ln() - 1.93} else {1.0};
+
         // Relax: Make it harder to apply the loose
         let strain_min = if with_rx { 0.93 } else { 0.92 };
         let strain_divisor = if with_rx { 0.94 } else { 0.93 };
         // * Cap deltatime to the OD 300 hitwindow.
         // * 0.93 is derived from making sure 260bpm OD8 streams aren't nerfed harshly, whilst 0.92 limits the effect of the cap.
         strain_time /= ((strain_time / hit_window) / strain_divisor).clamp(strain_min, 1.0);
-        
+
 
         // * derive speedBonus for calculation
         let speed_bonus = if strain_time < speed_bonus {
@@ -190,6 +193,7 @@ impl SpeedEvaluator {
             single_spacing_threshold.min(travel_dist + osu_curr_obj.dists.min_jump_dist);
 
         (speed_bonus + speed_bonus * (dist / single_spacing_threshold).powf(3.5))
+            * relax_low_speed_nerf
             * doubletapness
             / strain_time
     }
