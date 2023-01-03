@@ -416,7 +416,7 @@ impl OsuPpInner {
         let flashlight_value = self.compute_flashlight_value();
 
         let pp = if self.mods.rx() {
-            (aim_value.powf(1.1) + speed_value.powf(1.05) + acc_value.powf(1.1) + flashlight_value.powf(1.1))
+            (aim_value.powf(1.16) + acc_value.powf(1.1) + flashlight_value.powf(1.1))
                 .powf(1.0 / 1.1)
                 * multiplier
                 * 1.1 //Nobody want to see their pp dropped
@@ -653,6 +653,9 @@ impl OsuPpInner {
     }
 
     fn get_combo_scaling_factor(&self) -> f64 {
+        if self.mods.rx() {
+            return 1.0;
+        }
         if self.attrs.max_combo == 0 {
             1.0
         } else {

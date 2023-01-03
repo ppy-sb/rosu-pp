@@ -261,6 +261,11 @@ impl AimEvaluator {
                 + vel_change_bonus * velocity_multiplier,
         );
 
+        // * Add in additional slider velocity bonus.
+        if with_sliders {
+            aim_strain += slider_bonus * slider_multiplier;
+        }
+
         
         // For relax, we include some factor from stream to nerf aim raw value which comes from stream
         // This can reflect how stream like this strains is
@@ -277,12 +282,7 @@ impl AimEvaluator {
                 single_spacing_threshold.min(travel_dist + osu_curr_obj.dists.min_jump_dist);
             // Maybe this can show how the aim looks like stream arrangements
             let abstract_speed_value = (dist / single_spacing_threshold).powf(3.5) / strain_time;
-            print!("{}", abstract_speed_value)
-        }
-
-        // * Add in additional slider velocity bonus.
-        if with_sliders {
-            aim_strain += slider_bonus * slider_multiplier;
+            println!("AIM: {}, ASV: {}", aim_strain,  abstract_speed_value)
         }
 
         aim_strain
