@@ -282,8 +282,11 @@ impl AimEvaluator {
                 single_spacing_threshold.min(travel_dist + osu_curr_obj.dists.min_jump_dist);
             // Maybe this can show how the aim looks like stream arrangements
             let abstract_speed_value = (dist / single_spacing_threshold).powf(3.5) / strain_time;
-            println!("AIM: {}, ASV: {}", aim_strain,  abstract_speed_value)
+            let speed_nerf = -19.35 * abstract_speed_value + 0.97;
+            aim_strain *= speed_nerf;
         }
+
+        
 
         aim_strain
     }
