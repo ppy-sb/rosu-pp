@@ -2,7 +2,7 @@ use std::f64::consts::{FRAC_PI_2, PI};
 
 use crate::osu::difficulty_object::OsuDifficultyObject;
 
-use super::{previous, previous_start_time, OsuStrainSkill, Skill, StrainSkill};
+use super::{previous, previous_start_time, OsuStrainSkill, Skill, StrainSkill, next};
 
 #[derive(Clone, Debug)]
 pub(crate) struct Aim {
@@ -113,6 +113,10 @@ impl AimEvaluator {
     const ACUTE_ANGLE_MULTIPLIER: f64 = 1.95;
     const SLIDER_MULTIPLIER: f64 = 1.35;
     const VELOCITY_CHANGE_MULTIPLIER: f64 = 0.75;
+
+    const SINGLE_SPACING_THRESHOLD: f64 = 125.0;
+    const MIN_SPEED_BONUS: f64 = 75.0; // ~200BPM
+    const SPEED_BALANCING_FACTOR: f64 = 40.;
 
     fn evaluate_diff_of(
         curr: &OsuDifficultyObject<'_>,
@@ -266,31 +270,19 @@ impl AimEvaluator {
             aim_strain += slider_bonus * slider_multiplier;
         }
 
-        
-        // For relax, we include some factor from stream to nerf aim raw value which comes from stream
-        // This can reflect how stream like this strains is
         if with_rx {
-
-            let mut strain_time = curr.strain_time;
-            strain_time /= ((strain_time / hit_window) / 0.94).clamp(0.93, 1.0);
-
-            // Here we don't take strain time into consideration
-            let single_spacing_threshold:f64 = 125.0 * 1.2;
-            let osu_prev_obj = previous(diff_objects, curr.idx, 0);
-            let travel_dist = osu_prev_obj.map_or(0.0, |obj| obj.dists.travel_dist);
-            let dist =
-                single_spacing_threshold.min(travel_dist + osu_curr_obj.dists.min_jump_dist);
-            // Maybe this can show how the aim looks like stream arrangements
-            let abstract_speed_value = (dist / single_spacing_threshold).powf(3.5) / strain_time;
-            let speed_nerf = (0.38 - 0.09 * abstract_speed_value.ln()).clamp(0.8, 1.0);
-            aim_strain *= speed_nerf;
-            println!("AIM: {}, ASV: {}, AAB: {}", aim_strain,  abstract_speed_value, acute_angle_bonus)
+            let speed_strain = Self::evaluate_speed_rx_diff_of(curr, diff_objects, hit_window, with_rx);
+            if speed_strain > aim_strain {
+                aim_strain *= 0.8
+            }
+            println!("AIM: {}, SPD: {}", aim_strain, speed_strain)
         }
-
         
 
         aim_strain
     }
+
+    
 
     fn calc_wide_angle_bonus(angle: f64) -> f64 {
         let base = (3.0 / 4.0 * ((5.0 / 6.0 * PI).min(angle.max(PI / 6.0)) - PI / 6.0)).sin();
@@ -300,6 +292,71 @@ impl AimEvaluator {
 
     fn calc_acute_angle_bonus(angle: f64) -> f64 {
         1.0 - Self::calc_wide_angle_bonus(angle)
+    }
+
+    fn evaluate_speed_rx_diff_of(
+        curr: &OsuDifficultyObject<'_>,
+        diff_objects: &[OsuDifficultyObject<'_>],
+        hit_window: f64,
+        with_rx: bool
+    ) -> f64 {
+        if curr.base.is_spinner() {
+            return 0.0;
+        }
+        // Relax: 240BPM, Vanilla: 200BPM
+        let min_speed_bonus = if with_rx { 1.2 * Self::MIN_SPEED_BONUS } else { Self::MIN_SPEED_BONUS };
+
+        // Relax: More strict speed factor
+        let balancing_factor = if with_rx { 1.2 * Self::SPEED_BALANCING_FACTOR } else { Self::SPEED_BALANCING_FACTOR };
+        let single_spacing_threshold = if with_rx { 1.2 * Self::SINGLE_SPACING_THRESHOLD } else { Self::SINGLE_SPACING_THRESHOLD };
+
+        // * derive strainTime for calculation
+        let osu_curr_obj = curr;
+        let osu_prev_obj = previous(diff_objects, curr.idx, 0);
+        let osu_next_obj = next(diff_objects, curr.idx, 0);
+
+        let mut strain_time = curr.strain_time;
+        let mut doubletapness = 1.0;
+
+        // * Nerf doubletappable doubles.
+        if let Some(osu_next_obj) = osu_next_obj {
+            let curr_delta_time = osu_curr_obj.delta_time.max(1.0);
+            let next_delta_time = osu_next_obj.delta_time.max(1.0);
+            let delta_diff = (next_delta_time - curr_delta_time).abs();
+            let speed_ratio = curr_delta_time / curr_delta_time.max(delta_diff);
+            let window_ratio_base = (curr_delta_time / hit_window).min(1.0);
+            let window_ratio = window_ratio_base * window_ratio_base;
+            doubletapness = speed_ratio.powf(1.0 - window_ratio);
+        }
+
+        // (180, 0.8) (200, 0.9) (220, 0.92) (240, 1)
+        let relax_low_speed_nerf = if with_rx {0.65 * strain_time.ln() - 1.93} else {1.0};
+
+        // Relax: Make it harder to apply the loose
+        let strain_min = if with_rx { 0.93 } else { 0.92 };
+        let strain_divisor = if with_rx { 0.94 } else { 0.93 };
+        // * Cap deltatime to the OD 300 hitwindow.
+        // * 0.93 is derived from making sure 260bpm OD8 streams aren't nerfed harshly, whilst 0.92 limits the effect of the cap.
+        strain_time /= ((strain_time / hit_window) / strain_divisor).clamp(strain_min, 1.0);
+
+
+        // * derive speedBonus for calculation
+        // Relax don't need bonus for extra speed
+        let speed_bonus = if strain_time < min_speed_bonus {
+            let base = (min_speed_bonus - strain_time) / balancing_factor;
+            1.0 + 0.75 * base * base
+        } else {
+            1.0
+        };
+
+        let travel_dist = osu_prev_obj.map_or(0.0, |obj| obj.dists.travel_dist);
+        let dist =
+            single_spacing_threshold.min(travel_dist + osu_curr_obj.dists.min_jump_dist);
+
+        (speed_bonus + speed_bonus * (dist / single_spacing_threshold).powf(3.5))
+            * relax_low_speed_nerf
+            * doubletapness
+            / strain_time
     }
 }
 

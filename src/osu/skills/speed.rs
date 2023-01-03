@@ -142,6 +142,9 @@ impl SpeedEvaluator {
         if curr.base.is_spinner() {
             return 0.0;
         }
+        // Relax: 240BPM, Vanilla: 200BPM
+        let min_speed_bonus = if with_rx { 1.2 * Self::MIN_SPEED_BONUS } else { Self::MIN_SPEED_BONUS };
+
         // Relax: More strict speed factor
         let balancing_factor = if with_rx { 1.2 * Self::SPEED_BALANCING_FACTOR } else { Self::SPEED_BALANCING_FACTOR };
         let single_spacing_threshold = if with_rx { 1.2 * Self::SINGLE_SPACING_THRESHOLD } else { Self::SINGLE_SPACING_THRESHOLD };
@@ -178,8 +181,8 @@ impl SpeedEvaluator {
 
         // * derive speedBonus for calculation
         // Relax don't need bonus for extra speed
-        let speed_bonus = if !with_rx && strain_time < Self::MIN_SPEED_BONUS {
-            let base = (Self::MIN_SPEED_BONUS - strain_time) / balancing_factor;
+        let speed_bonus = if strain_time < min_speed_bonus {
+            let base = (min_speed_bonus - strain_time) / balancing_factor;
             1.0 + 0.75 * base * base
         } else {
             1.0
