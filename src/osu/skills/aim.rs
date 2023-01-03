@@ -77,7 +77,7 @@ impl StrainSkill for Aim {
         diff_objects: &[OsuDifficultyObject<'_>],
     ) -> f64 {
         self.curr_strain *= Self::strain_decay(curr.delta_time);
-        self.curr_strain += AimEvaluator::evaluate_diff_of(curr, diff_objects, self.with_sliders, self.with_rx)
+        self.curr_strain += AimEvaluator::evaluate_diff_of(curr, diff_objects, self.with_sliders, self.with_rx, self.hit_window)
             * Self::SKILL_MULTIPLIER;
         self.curr_rhythm = RhythmEvaluator::evaluate_diff_of(curr, diff_objects, self.hit_window);
 
@@ -119,6 +119,7 @@ impl AimEvaluator {
         diff_objects: &[OsuDifficultyObject<'_>],
         with_sliders: bool,
         with_rx: bool,
+        hit_window: f64
     ) -> f64 {
         let acute_angle_multiplier = if with_rx { Self::ACUTE_ANGLE_MULTIPLIER * 1.4 } else { Self::ACUTE_ANGLE_MULTIPLIER };
         let wide_angle_multiplier = if with_rx { Self::WIDE_ANGLE_MULTIPLIER * 1.2 } else { Self::WIDE_ANGLE_MULTIPLIER };
@@ -259,6 +260,25 @@ impl AimEvaluator {
             wide_angle_bonus * wide_angle_multiplier
                 + vel_change_bonus * velocity_multiplier,
         );
+
+        
+        // For relax, we include some factor from stream to nerf aim raw value which comes from stream
+        // This can reflect how stream like this strains is
+        if with_rx {
+
+            let mut strain_time = curr.strain_time;
+            strain_time /= ((strain_time / hit_window) / 0.94).clamp(0.93, 1.0);
+
+            // Here we don't take strain time into consideration
+            let single_spacing_threshold:f64 = 125.0 * 1.2;
+            let osu_prev_obj = previous(diff_objects, curr.idx, 0);
+            let travel_dist = osu_prev_obj.map_or(0.0, |obj| obj.dists.travel_dist);
+            let dist =
+                single_spacing_threshold.min(travel_dist + osu_curr_obj.dists.min_jump_dist);
+            // Maybe this can show how the aim looks like stream arrangements
+            let abstract_speed_value = (dist / single_spacing_threshold).powf(3.5) / strain_time;
+            print!("{}", abstract_speed_value)
+        }
 
         // * Add in additional slider velocity bonus.
         if with_sliders {

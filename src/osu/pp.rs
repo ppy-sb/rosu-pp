@@ -410,30 +410,13 @@ impl OsuPpInner {
             multiplier *= 1.0 - (self.attrs.n_spinners as f64 / total_hits).powf(0.85);
         }
 
-        let mut aim_value = self.compute_aim_value();
+        let aim_value = self.compute_aim_value();
         let speed_value = self.compute_speed_value();
-        let mut acc_value = self.compute_accuracy_value();
+        let acc_value = self.compute_accuracy_value();
         let flashlight_value = self.compute_flashlight_value();
 
-        if self.mods.rx() {
-            let stream_factor = aim_value / speed_value;
-
-            if stream_factor < 1.0 {
-                let depression_factor = if self.acc >= 0.97 {
-                    0.92 - ((1.0 - self.acc.ceil()) * 1.5)
-                } else {
-                    0.85
-                };
-
-                aim_value *= depression_factor;
-            }
-
-            aim_value *= (1.32 * stream_factor.powf(0.53)).clamp(0.8, 1.0);
-            acc_value *= (stream_factor + 0.4).clamp(0.8, 1.0);
-        }
-
         let pp = if self.mods.rx() {
-            (aim_value.powf(1.18) + acc_value.powf(1.12) + flashlight_value.powf(1.1))
+            (aim_value.powf(1.1) + speed_value.powf(1.05) + acc_value.powf(1.1) + flashlight_value.powf(1.1))
                 .powf(1.0 / 1.1)
                 * multiplier
                 * 1.1 //Nobody want to see their pp dropped
