@@ -284,13 +284,13 @@ impl AimEvaluator {
                 single_spacing_threshold.min(travel_dist + osu_curr_obj.dists.min_jump_dist);
             // The more stream, the lower abstract speed it will be
             // Constant speed and spacing stream can even gain 0 in this section
-            // Usually jumps and spacing stream can give between 0.9 - 1.1 which is the part we mainly scale
+            // Usually jumps and spacing //tream can give between 0.9 - 1.1 which is the part we mainly scale
             let abstract_speed_value = (dist / single_spacing_threshold).powf(3.5) / strain_time;
             let mut jump_bouns = 1.0;
             // The strain is kind of aim part
             if abstract_speed_value > 0.006 {
-                let x = abstract_speed_value * 1000.0;
-                jump_bouns *= 0.004312169312138223*x*x*x*x*x-0.17998677248551326*x*x*x*x+2.9782275132073606*x*x*x-24.408346560687125*x*x+99.07579365017011*x-158.2999999990352;
+                let x = (abstract_speed_value * 1000.0 * 100.0).round() / 100.0;
+                jump_bouns *= 0.004312*x*x*x*x*x-0.17998*x*x*x*x+2.9782*x*x*x-24.408*x*x+99.07*x-158.299;
                 jump_bouns = jump_bouns.clamp(1.0, 1.25);
             }
             // The strain is too stream (which is constant and easy to follow in relax)
@@ -299,7 +299,7 @@ impl AimEvaluator {
             }
             aim_strain *= jump_bouns;
 
-            //println!("Strain: {}, AbsSV: {}, Factor: {}", aim_strain, abstract_speed_value, jump_bouns)
+            println!("Strain: {}, AbsSV: {}, Factor: {}", aim_strain, abstract_speed_value, jump_bouns)
         }
 
         

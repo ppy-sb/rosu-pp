@@ -757,11 +757,11 @@ mod test {
 
     #[test]
     fn test_relax_aim_nerf() {
-        let beatmap = Beatmap::from_path("./maps/1045757.osu").unwrap(); //Kioku
+        //let beatmap = Beatmap::from_path("./maps/1045757.osu").unwrap(); //Kioku
         //let beatmap = Beatmap::from_path("./maps/1241370.osu").unwrap(); //Honesty
         //let beatmap = Beatmap::from_path("./maps/1537566.osu").unwrap(); //Sidetracked
         //let beatmap = Beatmap::from_path("./maps/869222.osu").unwrap(); //ROR
-        //let beatmap = Beatmap::from_path("./maps/2097898.osu").unwrap(); //Team Magma
+        let beatmap = Beatmap::from_path("./maps/2097898.osu").unwrap(); //Team Magma
         //let beatmap = Beatmap::from_path("./maps/1754777.osu").unwrap(); //Blue Zenith
         //let beatmap = Beatmap::from_path("./maps/2486881.osu").unwrap(); //Sunglow
 
