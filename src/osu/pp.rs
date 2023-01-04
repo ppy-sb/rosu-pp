@@ -744,6 +744,19 @@ mod test {
     use super::*;
     use crate::Beatmap;
 
+    #[test]
+    fn test_relax_aim_nerf() {
+        //let beatmap = Beatmap::from_path("./maps/1241370.osu").unwrap(); //Honesty
+        //let beatmap = Beatmap::from_path("./maps/1537566.osu").unwrap(); //Sidetracked
+        //let beatmap = Beatmap::from_path("./maps/869222.osu").unwrap(); //ROR
+        //let beatmap = Beatmap::from_path("./maps/2097898.osu").unwrap(); //Team Magma
+        //let beatmap = Beatmap::from_path("./maps/1754777.osu").unwrap(); //Blue Zenith
+        let beatmap = Beatmap::from_path("./maps/2486881.osu").unwrap(); //Sunglow
+
+        let result = OsuPP::new(&beatmap).accuracy(99.5).mods(200).calculate(); // HDDTRX
+        println!("PPAIM: {}", result.pp_aim);
+    }
+
     fn test_data() -> (Beatmap, OsuDifficultyAttributes) {
         let path = "./maps/2785319.osu";
         let map = Beatmap::from_path(path).unwrap();

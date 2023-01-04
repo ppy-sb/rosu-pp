@@ -275,16 +275,26 @@ impl AimEvaluator {
             strain_time /= ((strain_time / hit_window) / 0.94).clamp(0.93, 1.0);
 
             // Here we don't take strain time into consideration
-            let single_spacing_threshold:f64 = 125.0 * 1.2;
+            let single_spacing_threshold:f64 = 125.0 * 2.0;
             let osu_prev_obj = previous(diff_objects, curr.idx, 0);
             let travel_dist = osu_prev_obj.map_or(0.0, |obj| obj.dists.travel_dist);
             let dist =
                 single_spacing_threshold.min(travel_dist + osu_curr_obj.dists.min_jump_dist);
             // Maybe this can show how the aim looks like stream arrangements
             let abstract_speed_value = (dist / single_spacing_threshold).powf(3.5) / strain_time;
-            let speed_nerf = (0.38 - 0.09 * abstract_speed_value.ln()).clamp(0.8, 1.0);
-            aim_strain *= speed_nerf;
-            println!("AIM: {}, ASV: {}, AAB: {}", aim_strain,  abstract_speed_value, acute_angle_bonus)
+            let mut jump_bouns = 1.0;
+            // The strain is kind of aim part(they are always 0.6 - 1.0 in aim part)
+            if abstract_speed_value > 0.006 {
+                let x = abstract_speed_value * 1000.0;
+                jump_bouns *= 0.004312169312138223*x*x*x*x*x-0.17998677248551326*x*x*x*x+2.9782275132073606*x*x*x-24.408346560687125*x*x+99.07579365017011*x-158.2999999990352;
+                jump_bouns = jump_bouns.clamp(1.0, 1.25);
+            }
+            if abstract_speed_value < 0.002 {
+                jump_bouns = 0.8;
+            }
+            aim_strain *= jump_bouns;
+            //aim_strain *= stream_nerf;
+            println!("Strain: {}, AbsSV: {}, Factor: {}", aim_strain, abstract_speed_value, jump_bouns)
         }
 
         
