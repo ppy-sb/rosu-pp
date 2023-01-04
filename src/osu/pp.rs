@@ -506,6 +506,10 @@ impl OsuPpInner {
         // * It is important to consider accuracy difficulty when scaling with accuracy.
         aim_value *= 0.98 + self.attrs.od * self.attrs.od / 2500.0;
 
+        if self.mods.rx() && !self.mods.dt() {
+            aim_value *= 1.1
+        }
+
         aim_value
     }
 
