@@ -410,10 +410,15 @@ impl OsuPpInner {
             multiplier *= 1.0 - (self.attrs.n_spinners as f64 / total_hits).powf(0.85);
         }
 
-        let aim_value = self.compute_aim_value();
+        let mut aim_value = self.compute_aim_value();
         let speed_value = self.compute_speed_value();
         let acc_value = self.compute_accuracy_value();
         let flashlight_value = self.compute_flashlight_value();
+
+        //None buff
+        if !self.mods.rx() && !self.mods.ap() {
+            aim_value *= 1.08
+        }
 
         let pp = if self.mods.rx() {
             (aim_value.powf(1.135) + acc_value.powf(1.125) + flashlight_value.powf(1.1))
@@ -510,6 +515,12 @@ impl OsuPpInner {
     }
 
     fn compute_speed_value(&self) -> f64 {
+
+        // We dropped the whole speed calculation in relax
+        if self.mods.rx() {
+            return 0.0;
+        }
+
         let mut speed_value =
             (5.0 * (self.attrs.speed / 0.0675).max(1.0) - 4.0).powi(3) / 100_000.0;
 

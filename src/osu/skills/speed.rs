@@ -142,6 +142,11 @@ impl SpeedEvaluator {
         if curr.base.is_spinner() {
             return 0.0;
         }
+        // We dropped the whole speed calculation in relax
+        if with_rx {
+            return 0.0;
+        }
+
         // Relax: More strict speed factor
         let balancing_factor = if with_rx { 1.2 * Self::SPEED_BALANCING_FACTOR } else { Self::SPEED_BALANCING_FACTOR };
         let single_spacing_threshold = if with_rx { 1.2 * Self::SINGLE_SPACING_THRESHOLD } else { Self::SINGLE_SPACING_THRESHOLD };
