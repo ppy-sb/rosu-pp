@@ -416,7 +416,7 @@ impl OsuPpInner {
         let flashlight_value = self.compute_flashlight_value();
 
         let pp = if self.mods.rx() {
-            (aim_value.powf(1.16) + acc_value.powf(1.1) + flashlight_value.powf(1.1))
+            (aim_value.powf(1.14) + acc_value.powf(1.12) + flashlight_value.powf(1.1))
                 .powf(1.0 / 1.1)
                 * multiplier
                 * 1.1 //Nobody want to see their pp dropped
@@ -751,7 +751,7 @@ mod test {
         //let beatmap = Beatmap::from_path("./maps/869222.osu").unwrap(); //ROR
         //let beatmap = Beatmap::from_path("./maps/2097898.osu").unwrap(); //Team Magma
         //let beatmap = Beatmap::from_path("./maps/1754777.osu").unwrap(); //Blue Zenith
-        let beatmap = Beatmap::from_path("./maps/2486881.osu").unwrap(); //Sunglow
+        //let beatmap = Beatmap::from_path("./maps/2486881.osu").unwrap(); //Sunglow
 
         let result = OsuPP::new(&beatmap).accuracy(99.5).mods(200).calculate(); // HDDTRX
         println!("PPAIM: {}", result.pp_aim);
