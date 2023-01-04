@@ -751,7 +751,7 @@ mod test {
         //let beatmap = Beatmap::from_path("./maps/869222.osu").unwrap(); //ROR
         //let beatmap = Beatmap::from_path("./maps/2097898.osu").unwrap(); //Team Magma
         //let beatmap = Beatmap::from_path("./maps/1754777.osu").unwrap(); //Blue Zenith
-        //let beatmap = Beatmap::from_path("./maps/2486881.osu").unwrap(); //Sunglow
+        let beatmap = Beatmap::from_path("./maps/2486881.osu").unwrap(); //Sunglow
 
         let result = OsuPP::new(&beatmap).accuracy(99.5).mods(200).calculate(); // HDDTRX
         println!("PPAIM: {}", result.pp_aim);
