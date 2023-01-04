@@ -299,7 +299,7 @@ impl AimEvaluator {
             }
             aim_strain *= jump_bouns;
 
-            println!("Strain: {}, AbsSV: {}, Factor: {}", aim_strain, abstract_speed_value, jump_bouns)
+            //println!("Strain: {}, AbsSV: {}, Factor: {}", aim_strain, abstract_speed_value, jump_bouns)
         }
 
         
