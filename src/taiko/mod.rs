@@ -9,7 +9,12 @@ mod taiko_object;
 
 use std::{borrow::Cow, cell::RefCell, rc::Rc};
 
-pub use self::{gradual_difficulty::*, gradual_performance::*, pp::*};
+pub use self::{
+    gradual_difficulty::*, gradual_performance::*, pp::*,
+    taiko_object::TaikoObjectPub as TaikoObject,
+};
+
+pub(crate) use self::taiko_object::IntoTaikoObjectIter;
 
 use crate::{beatmap::BeatmapHitWindows, Beatmap, GameMode, Mods, OsuStars};
 
@@ -17,7 +22,6 @@ use self::{
     colours::ColourDifficultyPreprocessor,
     difficulty_object::{MonoIndex, ObjectLists, TaikoDifficultyObject},
     skills::{Peaks, PeaksDifficultyValues, PeaksRaw, Skill},
-    taiko_object::IntoTaikoObjectIter,
 };
 
 const SECTION_LEN: usize = 400;
@@ -92,14 +96,18 @@ impl<'map> TaikoStars<'map> {
     /// Adjust the clock rate used in the calculation.
     /// If none is specified, it will take the clock rate based on the mods
     /// i.e. 1.5 for DT, 0.75 for HT and 1.0 otherwise.
+    ///
+    /// The value cannot go below 0.001.
     #[inline]
     pub fn clock_rate(mut self, clock_rate: f64) -> Self {
-        self.clock_rate = Some(clock_rate);
+        self.clock_rate = Some(clock_rate.max(0.001));
 
         self
     }
 
     /// Specify whether the map is a convert i.e. an osu!standard map.
+    ///
+    /// This only needs to be specified if the map was converted manually beforehand.
     #[inline]
     pub fn is_convert(mut self, is_convert: bool) -> Self {
         self.is_convert = is_convert;

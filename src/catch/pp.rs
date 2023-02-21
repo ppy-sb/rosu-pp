@@ -152,9 +152,11 @@ impl<'map> CatchPP<'map> {
     /// Adjust the clock rate used in the calculation.
     /// If none is specified, it will take the clock rate based on the mods
     /// i.e. 1.5 for DT, 0.75 for HT and 1.0 otherwise.
+    ///
+    /// The value cannot go below 0.001.
     #[inline]
     pub fn clock_rate(mut self, clock_rate: f64) -> Self {
-        self.clock_rate = Some(clock_rate);
+        self.clock_rate = Some(clock_rate.max(0.001));
 
         self
     }
@@ -431,9 +433,7 @@ impl CatchPPInner {
         if total_hits == 0 {
             1.0
         } else {
-            (self.successful_hits() as f64 / total_hits as f64)
-                .max(0.0)
-                .min(1.0)
+            (self.successful_hits() as f64 / total_hits as f64).clamp(0.0, 1.0)
         }
     }
 }
@@ -557,9 +557,7 @@ mod test {
 
         assert!(
             (target_acc - acc).abs() < 1.0,
-            "Expected: {} | Actual: {}",
-            target_acc,
-            acc
+            "Expected: {target_acc} | Actual: {acc}",
         );
     }
 
@@ -598,9 +596,7 @@ mod test {
 
         assert!(
             (target_acc - acc).abs() < 1.0,
-            "Expected: {} | Actual: {}",
-            target_acc,
-            acc
+            "Expected: {target_acc} | Actual: {acc}",
         );
     }
 

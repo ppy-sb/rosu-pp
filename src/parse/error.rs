@@ -1,4 +1,4 @@
-use std::{error::Error as StdError, fmt, io::Error as IoError, num::ParseFloatError};
+use std::{error::Error as StdError, fmt, io::Error as IoError};
 
 /// `Result<_, ParseError>`
 pub type ParseResult<T> = Result<T, ParseError>;
@@ -11,18 +11,6 @@ pub enum ParseError {
     IoError(IoError),
     /// The initial data of an `.osu` file was incorrect.
     IncorrectFileHeader,
-    /// Line in `.osu` was unexpectedly not of the form `key:value`.
-    BadLine,
-    /// Line in `.osu` that contains a slider was not in the proper format.
-    InvalidCurvePoints,
-    /// Expected a decimal number, got something else.
-    InvalidDecimalNumber,
-    /// Failed to parse game mode.
-    InvalidMode,
-    /// Expected an additional field.
-    MissingField(&'static str),
-    /// Failed to recognized specified type for hitobjects.
-    UnknownHitObjectKind,
 }
 
 impl fmt::Display for ParseError {
@@ -32,12 +20,6 @@ impl fmt::Display for ParseError {
             Self::IncorrectFileHeader => {
                 write!(f, "expected `osu file format v` at file begin")
             }
-            Self::BadLine => f.write_str("line not in `Key:Value` pattern"),
-            Self::InvalidCurvePoints => f.write_str("invalid curve point"),
-            Self::InvalidDecimalNumber => f.write_str("invalid float number"),
-            Self::InvalidMode => f.write_str("invalid mode"),
-            Self::MissingField(field) => write!(f, "missing field `{}`", field),
-            Self::UnknownHitObjectKind => f.write_str("unsupported hitobject kind"),
         }
     }
 }
@@ -47,12 +29,6 @@ impl StdError for ParseError {
         match self {
             Self::IoError(inner) => Some(inner),
             Self::IncorrectFileHeader => None,
-            Self::BadLine => None,
-            Self::InvalidCurvePoints => None,
-            Self::InvalidDecimalNumber => None,
-            Self::InvalidMode => None,
-            Self::MissingField(_) => None,
-            Self::UnknownHitObjectKind => None,
         }
     }
 }
@@ -60,11 +36,5 @@ impl StdError for ParseError {
 impl From<IoError> for ParseError {
     fn from(other: IoError) -> Self {
         Self::IoError(other)
-    }
-}
-
-impl From<ParseFloatError> for ParseError {
-    fn from(_: ParseFloatError) -> Self {
-        Self::InvalidDecimalNumber
     }
 }

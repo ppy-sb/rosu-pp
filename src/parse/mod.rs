@@ -33,16 +33,6 @@ use crate::{
     util::{SortedVec, TandemSorter},
 };
 
-trait OptionExt<T> {
-    fn next_field(self, field: &'static str) -> Result<T, ParseError>;
-}
-
-impl<T> OptionExt<T> for Option<T> {
-    fn next_field(self, field: &'static str) -> Result<T, ParseError> {
-        self.ok_or(ParseError::MissingField(field))
-    }
-}
-
 trait InRange: Sized + Copy + Neg<Output = Self> + PartialOrd + FromStr {
     const LIMIT: Self;
 
@@ -125,7 +115,10 @@ macro_rules! parse_general_body {
                 break;
             }
 
-            let (key, value) = $reader.split_colon().ok_or(ParseError::BadLine)?;
+            let (key, value) = match $reader.split_colon() {
+                Some(tuple) => tuple,
+                None => continue,
+            };
 
             if key == b"Mode" {
                 mode = match value {
@@ -133,7 +126,7 @@ macro_rules! parse_general_body {
                     "1" => Some(GameMode::Taiko),
                     "2" => Some(GameMode::Catch),
                     "3" => Some(GameMode::Mania),
-                    _ => return Err(ParseError::InvalidMode),
+                    _ => continue,
                 };
             }
 
@@ -169,7 +162,10 @@ macro_rules! parse_difficulty_body {
                 break;
             }
 
-            let (key, value) = $reader.split_colon().ok_or(ParseError::BadLine)?;
+            let (key, value) = match $reader.split_colon() {
+                Some(tuple) => tuple,
+                None => continue,
+            };
 
             match key {
                 b"ApproachRate" => {
@@ -239,15 +235,8 @@ macro_rules! parse_events_body {
 
             // We're only interested in breaks
             if let Some(b'2') = split.next().and_then(|value| value.bytes().next()) {
-                let start_time = split
-                    .next()
-                    .next_field("break start")
-                    .map(f64::parse_in_range)?;
-
-                let end_time = split
-                    .next()
-                    .next_field("break end")
-                    .map(f64::parse_in_range)?;
+                let start_time = split.next().and_then(f64::parse_in_range);
+                let end_time = split.next().and_then(f64::parse_in_range);
 
                 if let (Some(start_time), Some(end_time)) = (start_time, end_time) {
                     $self.breaks.push(Break {
@@ -279,13 +268,7 @@ macro_rules! parse_timingpoints_body {
             let line = $reader.get_line()?;
             let mut split = line.split(',');
 
-            let time_opt = split
-                .next()
-                .next_field("timing point time")
-                .map(str::trim)
-                .map(f64::parse_in_range)?;
-
-            let time = match time_opt {
+            let time = match split.next().map(str::trim).and_then(f64::parse_in_range) {
                 Some(time) => time,
                 None => continue,
             };
@@ -293,11 +276,10 @@ macro_rules! parse_timingpoints_body {
             // * beatLength is allowed to be NaN to handle an edge case in which
             // * some beatmaps use NaN slider velocity to disable slider tick
             // * generation (see LegacyDifficultyControlPoint).
-            let beat_len: f64 = split.next().next_field("beat len")?.trim().parse()?;
-
-            if !(beat_len.is_in_range() || beat_len.is_nan()) {
-                continue;
-            }
+            let beat_len = match split.next().map(str::trim).map(str::parse::<f64>) {
+                Some(Ok(beat_len)) if beat_len.is_in_range() || beat_len.is_nan() => beat_len,
+                _ => continue,
+            };
 
             let mut timing_change = true;
             let mut kiai = false;
@@ -416,7 +398,7 @@ macro_rules! parse_hitobjects_body {
         // Buffer to re-use for all sliders
         let mut vertices = Vec::new();
 
-        while next_line!($reader)? != 0 {
+        'next_line: while next_line!($reader)? != 0 {
             if let Some(bytes) = $reader.get_section() {
                 *$section = Section::from_bytes(bytes);
                 empty = false;
@@ -428,95 +410,70 @@ macro_rules! parse_hitobjects_body {
 
             let x = split
                 .next()
-                .next_field("x pos")
-                .map(|s| f32::parse_in_custom_range(s, MAX_COORDINATE_VALUE as f32))?
+                .and_then(|s| f32::parse_in_custom_range(s, MAX_COORDINATE_VALUE as f32))
                 .map(|x| x as i32 as f32);
 
             let y = split
                 .next()
-                .next_field("y pos")
-                .map(|s| f32::parse_in_custom_range(s, MAX_COORDINATE_VALUE as f32))?
+                .and_then(|s| f32::parse_in_custom_range(s, MAX_COORDINATE_VALUE as f32))
                 .map(|x| x as i32 as f32);
 
             let pos = if let (Some(x), Some(y)) = (x, y) {
                 Pos2 { x, y }
             } else {
-                continue;
+                continue 'next_line;
             };
 
-            let time_opt = split
-                .next()
-                .next_field("hitobject time")
-                .map(str::trim)
-                .map(f64::parse_in_range)?;
-
-            let time = match time_opt {
+            let time = match split.next().map(str::trim).and_then(f64::parse_in_range) {
                 Some(time) => time,
-                None => continue,
+                None => continue 'next_line,
             };
 
             if !$self.hit_objects.is_empty() && time < prev_time {
                 unsorted = true;
             }
 
-            let kind: u8 = match split.next().next_field("hitobject kind")?.parse() {
-                Ok(kind) => kind,
-                Err(_) => continue,
+            let kind = match split.next().map(str::parse::<u8>) {
+                Some(Ok(kind)) => kind,
+                _ => continue 'next_line,
             };
 
-            let mut sound: u8 = match split.next().next_field("sound")?.parse() {
-                Ok(sound) => sound,
-                Err(_) => continue,
+            let mut sound = match split.next().map(str::parse::<u8>) {
+                Some(Ok(sound)) => sound,
+                _ => continue 'next_line,
             };
 
-            #[derive(Debug)]
-            enum Status {
-                Ok(bool),
-                Skip,
-                Err(ParseError),
-            }
-
-            fn has_custom_sound_file(bank_info: Option<&str>) -> Status {
+            fn has_custom_sound_file(bank_info: Option<&str>) -> Option<bool> {
                 let mut split = match bank_info {
                     Some(s) if !s.is_empty() => s.split(':'),
-                    _ => return Status::Ok(false),
+                    _ => return Some(false),
                 };
 
+                split.next().and_then(i32::parse_in_range)?;
+                split.next().and_then(i32::parse_in_range)?;
+
                 match split.next().map(i32::parse_in_range) {
                     Some(Some(_)) => {}
-                    Some(None) => return Status::Skip,
-                    None => return Status::Err(ParseError::MissingField("normal set")),
+                    None => return Some(false),
+                    Some(None) => return None,
                 }
 
                 match split.next().map(i32::parse_in_range) {
                     Some(Some(_)) => {}
-                    Some(None) => return Status::Skip,
-                    None => return Status::Err(ParseError::MissingField("additional set")),
-                }
-
-                match split.next().map(i32::parse_in_range) {
-                    Some(Some(_)) => {}
-                    None => return Status::Ok(false),
-                    Some(None) => return Status::Skip,
-                }
-
-                match split.next().map(i32::parse_in_range) {
-                    Some(Some(_)) => {}
-                    None => return Status::Ok(false),
-                    Some(None) => return Status::Skip,
+                    None => return Some(false),
+                    Some(None) => return None,
                 }
 
                 let filename = split.next().filter(|filename| !filename.is_empty());
 
-                Status::Ok(filename.is_some())
+                Some(filename.is_some())
             }
 
             let kind = if kind & Self::CIRCLE_FLAG > 0 {
                 match has_custom_sound_file(split.next()) {
-                    Status::Ok(false) => {}
-                    Status::Ok(true) => sound = 0,
-                    Status::Skip => continue,
-                    Status::Err(err) => return Err(err),
+                    Some(false) => {}
+                    Some(true) => sound = 0,
+                    None => continue 'next_line,
                 }
 
                 $self.n_circles += 1;
@@ -528,13 +485,16 @@ macro_rules! parse_hitobjects_body {
                 // Control Points: [1, 94872] | Median=3 | Mean=2.9984
                 let mut control_points = Vec::with_capacity(3);
 
-                let control_point_iter = split.next().next_field("control points")?.split('|');
+                let control_point_iter = match split.next() {
+                    Some(s) => s.split('|'),
+                    None => continue 'next_line,
+                };
 
-                let repeats = match split.next().next_field("repeats")?.parse::<usize>() {
+                let repeats = match split.next().map(str::parse::<usize>) {
                     // * osu-stable treated the first span of the slider
                     // * as a repeat, but no repeats are happening
-                    Ok(repeats @ 0..=9000) => repeats.saturating_sub(1),
-                    Ok(_) | Err(_) => continue,
+                    Some(Ok(repeats @ 0..=9000)) => repeats.saturating_sub(1),
+                    _ => continue 'next_line,
                 };
 
                 let mut start_idx = 0;
@@ -565,28 +525,36 @@ macro_rules! parse_hitobjects_body {
                     // * The start of the next segment is the index after the type descriptor.
                     let end_point = point_split.get(end_idx + 1).copied();
 
-                    convert_points(
+                    let convert_res = convert_points(
                         &point_split[start_idx..end_idx],
                         end_point,
                         first,
                         pos,
                         &mut control_points,
                         &mut vertices,
-                    )?;
+                    );
+
+                    if convert_res == ConvertStatus::Err {
+                        continue 'next_line;
+                    }
 
                     start_idx = end_idx;
                     first = false;
                 }
 
                 if end_idx > start_idx {
-                    convert_points(
+                    let convert_res = convert_points(
                         &point_split[start_idx..end_idx],
                         None,
                         first,
                         pos,
                         &mut control_points,
                         &mut vertices,
-                    )?;
+                    );
+
+                    if convert_res == ConvertStatus::Err {
+                        continue 'next_line;
+                    }
                 }
 
                 if control_points.is_empty() {
@@ -597,7 +565,7 @@ macro_rules! parse_hitobjects_body {
                         .map(|s| f64::parse_in_custom_range(s, MAX_COORDINATE_VALUE as f64))
                     {
                         Some(Some(len)) => (len > 0.0).then_some(len),
-                        Some(None) => continue,
+                        Some(None) => continue 'next_line,
                         None => None,
                     };
 
@@ -614,10 +582,9 @@ macro_rules! parse_hitobjects_body {
                     // Note: Edge sets are currently not considered, seems to be fine though.
 
                     match has_custom_sound_file(split.nth(1)) {
-                        Status::Ok(false) => {}
-                        Status::Ok(true) => sound = 0,
-                        Status::Skip => continue,
-                        Status::Err(err) => return Err(err),
+                        Some(false) => {}
+                        Some(true) => sound = 0,
+                        None => continue 'next_line,
                     }
 
                     HitObjectKind::Slider {
@@ -630,16 +597,15 @@ macro_rules! parse_hitobjects_body {
             } else if kind & Self::SPINNER_FLAG > 0 {
                 $self.n_spinners += 1;
 
-                let end_time = match split.next().next_field("spinner endtime")?.parse::<f64>() {
-                    Ok(end_time) => end_time.max(time),
-                    Err(_) => continue,
+                let end_time = match split.next().map(str::parse::<f64>) {
+                    Some(Ok(end_time)) => end_time.max(time),
+                    _ => continue 'next_line,
                 };
 
                 match has_custom_sound_file(split.next()) {
-                    Status::Ok(false) => {}
-                    Status::Ok(true) => sound = 0,
-                    Status::Skip => continue,
-                    Status::Err(err) => return Err(err),
+                    Some(false) => {}
+                    Some(true) => sound = 0,
+                    None => continue 'next_line,
                 }
 
                 HitObjectKind::Spinner { end_time }
@@ -650,14 +616,13 @@ macro_rules! parse_hitobjects_body {
                     Some((head, tail)) => {
                         let parsed = match f64::parse_in_range(head) {
                             Some(time_) => time_.max(time),
-                            None => continue,
+                            None => continue 'next_line,
                         };
 
                         match has_custom_sound_file(Some(tail)) {
-                            Status::Ok(false) => {}
-                            Status::Ok(true) => sound = 0,
-                            Status::Skip => continue,
-                            Status::Err(err) => return Err(err),
+                            Some(false) => {}
+                            Some(true) => sound = 0,
+                            None => continue 'next_line,
                         }
 
                         parsed
@@ -667,7 +632,7 @@ macro_rules! parse_hitobjects_body {
 
                 HitObjectKind::Hold { end_time }
             } else {
-                return Err(ParseError::UnknownHitObjectKind);
+                continue 'next_line;
             };
 
             $self.hit_objects.push(HitObject {
@@ -713,7 +678,7 @@ fn parse_custom_sound(sound: &str) -> u8 {
     sound
         .bytes()
         .try_fold(0_u8, |sound, byte| match byte {
-            b'0'..=b'9' => Some(sound.wrapping_mul(10).wrapping_add((byte & 0xF) as u8)),
+            b'0'..=b'9' => Some(sound.wrapping_mul(10).wrapping_add(byte & 0xF)),
             _ => None,
         })
         .unwrap_or(0)
@@ -782,9 +747,13 @@ impl Beatmap {
 }
 
 mod slider_parsing {
-    use crate::ParseError;
+    use super::{InRange, Pos2, MAX_COORDINATE_VALUE};
 
-    use super::Pos2;
+    #[derive(PartialEq, Eq)]
+    pub(super) enum ConvertStatus {
+        Ok,
+        Err,
+    }
 
     pub(super) fn convert_points(
         points: &[&str],
@@ -793,7 +762,7 @@ mod slider_parsing {
         offset: Pos2,
         curve_points: &mut Vec<PathControlPoint>,
         vertices: &mut Vec<PathControlPoint>,
-    ) -> Result<(), ParseError> {
+    ) -> ConvertStatus {
         let mut path_kind = PathType::from_str(points[0]);
 
         let read_offset = first as usize;
@@ -808,12 +777,18 @@ mod slider_parsing {
 
         // * Parse into control points.
         for &point in points.iter().skip(1) {
-            vertices.push(read_point(point, offset)?);
+            match read_point(point, offset) {
+                Some(point) => vertices.push(point),
+                None => return ConvertStatus::Err,
+            }
         }
 
         // * If an endpoint is given, add it to the end.
         if let Some(end_point) = end_point {
-            vertices.push(read_point(end_point, offset)?);
+            match read_point(end_point, offset) {
+                Some(point) => vertices.push(point),
+                None => return ConvertStatus::Err,
+            }
         }
 
         // * Edge-case rules (to match stable).
@@ -881,16 +856,18 @@ mod slider_parsing {
             curve_points.extend(&vertices[start_idx..end_idx]);
         }
 
-        Ok(())
+        ConvertStatus::Ok
     }
 
-    pub(super) fn read_point(value: &str, start_pos: Pos2) -> Result<PathControlPoint, ParseError> {
-        let mut v = value.split(':').map(str::parse);
+    pub(super) fn read_point(value: &str, start_pos: Pos2) -> Option<PathControlPoint> {
+        let mut v = value
+            .split(':')
+            .flat_map(|s| f64::parse_in_custom_range(s, MAX_COORDINATE_VALUE as f64))
+            .map(|n| n as i32 as f32);
 
-        match (v.next(), v.next()) {
-            (Some(Ok(x)), Some(Ok(y))) => Ok(PathControlPoint::from(Pos2 { x, y } - start_pos)),
-            _ => Err(ParseError::InvalidCurvePoints),
-        }
+        v.next()
+            .zip(v.next())
+            .map(|(x, y)| PathControlPoint::from(Pos2 { x, y } - start_pos))
     }
 
     fn is_linear(p0: Pos2, p1: Pos2, p2: Pos2) -> bool {

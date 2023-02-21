@@ -38,6 +38,7 @@ use crate::{
 #[allow(clippy::upper_case_acronyms)]
 pub struct TaikoPP<'map> {
     pub(crate) map: Cow<'map, Beatmap>,
+    is_convert: bool,
     attributes: Option<TaikoDifficultyAttributes>,
     mods: u32,
     combo: Option<usize>,
@@ -55,8 +56,11 @@ impl<'map> TaikoPP<'map> {
     /// Create a new performance calculator for osu!taiko maps.
     #[inline]
     pub fn new(map: &'map Beatmap) -> Self {
+        let map = map.convert_mode(GameMode::Taiko);
+
         Self {
-            map: map.convert_mode(GameMode::Taiko),
+            is_convert: matches!(map, Cow::Owned(_)),
+            map,
             attributes: None,
             mods: 0,
             combo: None,
@@ -158,9 +162,21 @@ impl<'map> TaikoPP<'map> {
     /// Adjust the clock rate used in the calculation.
     /// If none is specified, it will take the clock rate based on the mods
     /// i.e. 1.5 for DT, 0.75 for HT and 1.0 otherwise.
+    ///
+    /// The value cannot go below 0.001.
     #[inline]
     pub fn clock_rate(mut self, clock_rate: f64) -> Self {
-        self.clock_rate = Some(clock_rate);
+        self.clock_rate = Some(clock_rate.max(0.001));
+
+        self
+    }
+
+    /// Specify whether the map is a convert i.e. an osu!standard map.
+    ///
+    /// This only needs to be specified if the map was converted manually beforehand.
+    #[inline]
+    pub fn is_convert(mut self, is_convert: bool) -> Self {
+        self.is_convert = is_convert;
 
         self
     }
@@ -188,7 +204,7 @@ impl<'map> TaikoPP<'map> {
         let attrs = self.attributes.take().unwrap_or_else(|| {
             let mut calculator = TaikoStars::new(self.map.as_ref())
                 .mods(self.mods)
-                .is_convert(matches!(self.map, Cow::Owned(_)));
+                .is_convert(self.is_convert);
 
             if let Some(passed_objects) = self.passed_objects {
                 calculator = calculator.passed_objects(passed_objects);
@@ -404,8 +420,11 @@ impl<'map> From<OsuPP<'map>> for TaikoPP<'map> {
             hitresult_priority,
         } = osu;
 
+        let map = map.convert_mode(GameMode::Taiko);
+
         Self {
-            map: map.convert_mode(GameMode::Taiko),
+            is_convert: matches!(map, Cow::Owned(_)),
+            map,
             attributes: None,
             mods,
             combo,

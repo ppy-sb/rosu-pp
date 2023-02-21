@@ -9,13 +9,12 @@ use std::borrow::Cow;
 
 use crate::{beatmap::BeatmapHitWindows, util::FloatExt, Beatmap, GameMode, Mods, OsuStars};
 
-pub use self::{gradual_difficulty::*, gradual_performance::*, pp::*};
+pub use self::{gradual_difficulty::*, gradual_performance::*, mania_object::ManiaObject, pp::*};
 
-pub(crate) use self::mania_object::ManiaObject;
+pub(crate) use self::mania_object::ObjectParameters;
 
 use self::{
     difficulty_object::ManiaDifficultyObject,
-    mania_object::ObjectParameters,
     skills::{Skill, Strain},
 };
 
@@ -90,14 +89,18 @@ impl<'map> ManiaStars<'map> {
     /// Adjust the clock rate used in the calculation.
     /// If none is specified, it will take the clock rate based on the mods
     /// i.e. 1.5 for DT, 0.75 for HT and 1.0 otherwise.
+    ///
+    /// The value cannot go below 0.001.
     #[inline]
     pub fn clock_rate(mut self, clock_rate: f64) -> Self {
-        self.clock_rate = Some(clock_rate);
+        self.clock_rate = Some(clock_rate.max(0.001));
 
         self
     }
 
     /// Specify whether the map is a convert i.e. an osu!standard map.
+    ///
+    /// This only needs to be specified if the map was converted manually beforehand.
     #[inline]
     pub fn is_convert(mut self, is_convert: bool) -> Self {
         self.is_convert = is_convert;

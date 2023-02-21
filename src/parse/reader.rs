@@ -138,12 +138,15 @@ impl<R> FileReader<R> {
             .and_then(|idx| {
                 self.buf[idx..]
                     .starts_with(b"osu file format v")
-                    .then_some(idx + 17)
+                    .then_some(self.buf[idx + 17..].iter())
             })
-            .map(|idx| {
-                let mut n = 0;
+            .and_then(|mut num| {
+                let mut n = num
+                    .next()
+                    .filter(|byte| (b'0'..=b'9').contains(byte))
+                    .map(|&byte| byte & 0xF)?;
 
-                for byte in &self.buf[idx..] {
+                for byte in num {
                     if !(b'0'..=b'9').contains(byte) {
                         break;
                     }
@@ -151,7 +154,7 @@ impl<R> FileReader<R> {
                     n = 10 * n + (*byte & 0xF);
                 }
 
-                n
+                Some(n)
             })
             .ok_or(ParseError::IncorrectFileHeader)
     }
@@ -186,11 +189,15 @@ impl<R> FileReader<R> {
 
     /// Split the buffer at the first ':', then parse the second half into a string.
     ///
-    /// Returns `None` if there is no ':' or if the second half is invalid UTF-8.
+    /// Returns `None` if the second half is invalid UTF-8.
     pub(crate) fn split_colon(&self) -> Option<(&[u8], &str)> {
-        let idx = self.buf.iter().position(|&byte| byte == b':')?;
-        let front = &self.buf[..idx];
+        let idx = match self.buf.iter().position(|&byte| byte == b':') {
+            Some(idx) => idx,
+            None => return Some((&self.buf, "")),
+        };
+
         let back = std::str::from_utf8(&self.buf[idx + 1..]).ok()?;
+        let front = &self.buf[..idx];
 
         Some((front, back.trim_start()))
     }

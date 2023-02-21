@@ -6,20 +6,19 @@ mod gradual_performance;
 mod movement;
 mod pp;
 
-use catch_object::CatchObject;
 use difficulty_object::DifficultyObject;
-use fruit_or_juice::FruitOrJuice;
-pub use gradual_difficulty::*;
-pub use gradual_performance::*;
 use movement::Movement;
-pub use pp::*;
 
-use crate::{catch::fruit_or_juice::FruitParams, curve::CurveBuffers, Beatmap, Mods, OsuStars};
+pub use self::{catch_object::CatchObject, gradual_difficulty::*, gradual_performance::*, pp::*};
+
+pub(crate) use self::fruit_or_juice::{FruitOrJuice, FruitParams};
+
+use crate::{curve::CurveBuffers, Beatmap, Mods, OsuStars};
 
 const SECTION_LENGTH: f64 = 750.0;
 const STAR_SCALING_FACTOR: f64 = 0.153;
 
-const ALLOWED_CATCH_RANGE: f32 = 0.8;
+pub(crate) const ALLOWED_CATCH_RANGE: f32 = 0.8;
 const CATCHER_SIZE: f32 = 106.75;
 
 /// Difficulty calculator on osu!catch maps.
@@ -85,9 +84,11 @@ impl<'map> CatchStars<'map> {
     /// Adjust the clock rate used in the calculation.
     /// If none is specified, it will take the clock rate based on the mods
     /// i.e. 1.5 for DT, 0.75 for HT and 1.0 otherwise.
+    ///
+    /// The value cannot go below 0.001.
     #[inline]
     pub fn clock_rate(mut self, clock_rate: f64) -> Self {
-        self.clock_rate = Some(clock_rate);
+        self.clock_rate = Some(clock_rate.max(0.001));
 
         self
     }

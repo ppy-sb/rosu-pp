@@ -2,10 +2,32 @@
 
 Nothing as of now
 
-# v0.9.2 (2022-11-08)
+# v0.9.4 (2023-02-09)
+
+- __Additions:__
+  - Added the method `{TaikoPP/ManiaPP}::is_convert` which **needs** to be used if the map was manually converted beforehand
 
 - __Adjustments:__
-  - When passing an osu!std map to `TaikoGradualDifficultyAttributes` or `ManiaGradualDifficultyAttributes`, it now automatically converts the map internally. For osu!catch is was already happening trivially.
+  - Specified clock rates can no longer go below 0.001 to prevent crashing due to memory hogging.
+  - (technically breaking) The only reasons for parsing to fail are now IO errors or invalid file headers. All other `ParseError` variants have been removed and instead of throwing an error the line is just ignored.
+
+- __Fixes:__
+  - The `Beatmap::bpm` method now works properly by considering the most common beat length instead of just the first one
+
+## v0.9.3 (2023-01-28)
+
+- __Additions:__
+  - Added the method `ScoreState::total_hits`
+  - Added the trait methods `BeatmapExt::{mode}_hitobjects` which return a list of mode-specific processed `HitObject`s ([#20])
+
+- __Fixes:__
+  - Lines with invalid curve points are now ignored instead of throwing an error while parsing
+  - Fixed a niche capacity overflow in curve generation
+
+## v0.9.2 (2022-11-08)
+
+- __Adjustments:__
+  - When passing an osu!std map to `TaikoGradualDifficultyAttributes` or `ManiaGradualDifficultyAttributes`, it now automatically converts the map internally. For osu!catch it was already happening trivially.
 
 - __Fixes:__
   - Fixed passed object count for taiko by ignoring non-circles
@@ -221,3 +243,4 @@ Big changes including the most recent [osu!](https://osu.ppy.sh/home/news/2022-0
 [#14]: https://github.com/MaxOhn/rosu-pp/pull/14
 [#15]: https://github.com/MaxOhn/rosu-pp/pull/15
 [#18]: https://github.com/MaxOhn/rosu-pp/pull/18
+#[#20]: https://github.com/MaxOhn/rosu-pp/pull/20
