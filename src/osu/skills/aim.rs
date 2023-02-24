@@ -297,9 +297,15 @@ impl AimEvaluator {
             if abstract_speed_value < 0.002 {
                 jump_bouns = 0.8;
             }
+
+            // This is a piece of shit but works
+            if aim_strain > 6.0 {
+                jump_bouns = 1.0
+            }
+
             aim_strain *= jump_bouns;
 
-            //println!("Strain: {}, AbsSV: {}, Factor: {}", aim_strain, abstract_speed_value, jump_bouns)
+            //println!("Strain: {}, AbsSV: {}, Factor: {}, ST: {}", aim_strain, abstract_speed_value, jump_bouns, strain_time)
         }
 
         
