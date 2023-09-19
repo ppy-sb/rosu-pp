@@ -199,12 +199,12 @@ impl<'map> OsuStars<'map> {
 
         OsuStrains {
             section_len: SECTION_LEN,
-            aim: aim.strain_peaks,
-            aim_rx: aim_rx.strain_peaks,
-            aim_no_sliders: aim_no_sliders.strain_peaks,
-            speed: speed.strain_peaks,
-            speed_rx: speed_rx.strain_peaks,
-            flashlight: flashlight.strain_peaks,
+            aim: aim.strain_peaks.to_vec(),
+            aim_rx: aim_rx.strain_peaks.to_vec(),
+            aim_no_sliders: aim_no_sliders.strain_peaks.to_vec(),
+            speed: speed.strain_peaks.to_vec(),
+            speed_rx: speed_rx.strain_peaks.to_vec(),
+            flashlight: flashlight.strain_peaks.to_vec(),
         }
     }
 }
