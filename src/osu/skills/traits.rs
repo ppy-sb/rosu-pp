@@ -1,6 +1,9 @@
 use std::{cmp::Ordering, mem};
 
-use crate::osu::{difficulty_object::OsuDifficultyObject, SECTION_LEN};
+use crate::{
+    osu::{difficulty_object::OsuDifficultyObject, SECTION_LEN},
+    util::CompactVec,
+};
 
 pub(crate) trait Skill {
     fn process(&mut self, curr: &OsuDifficultyObject<'_>, diff_objects: &[OsuDifficultyObject<'_>]);
@@ -10,7 +13,7 @@ pub(crate) trait Skill {
 pub(crate) trait StrainSkill: Skill + Sized {
     const DECAY_WEIGHT: f64 = 0.9;
 
-    fn strain_peaks_mut(&mut self) -> &mut Vec<f64>;
+    fn strain_peaks_mut(&mut self) -> &mut CompactVec;
     fn curr_section_peak(&mut self) -> &mut f64;
     fn curr_section_end(&mut self) -> &mut f64;
 
@@ -47,6 +50,18 @@ pub(crate) trait StrainSkill: Skill + Sized {
             }
 
             *self.curr_section_end() += SECTION_LEN;
+
+            // Optimization to finish the loop early if
+            // the current peak is 0.0 i.e. it can't decay further.
+            // If final values don't coincide perfectly anymore,
+            // this should be looked at and maybe adjusted.
+            if self.curr_section_peak().abs() <= f64::EPSILON
+                && curr.start_time > *self.curr_section_end()
+            {
+                let remaining_time = curr.start_time - *self.curr_section_end();
+                let remaining_iters = (remaining_time / SECTION_LEN).ceil();
+                *self.curr_section_end() += remaining_iters * SECTION_LEN;
+            }
         }
 
         *self.curr_section_peak() = self
@@ -76,7 +91,7 @@ pub(crate) trait StrainSkill: Skill + Sized {
     fn difficulty_value(&mut self) -> f64;
 
     #[inline]
-    fn get_curr_strain_peaks(&mut self) -> Vec<f64> {
+    fn get_curr_strain_peaks(&mut self) -> CompactVec {
         let curr_peak = *self.curr_section_peak();
         let mut strain_peaks = mem::take(self.strain_peaks_mut());
         strain_peaks.push(curr_peak);
@@ -97,8 +112,9 @@ pub(crate) trait OsuStrainSkill: StrainSkill + Sized {
         // * Sections with 0 strain are excluded to avoid worst-case time complexity of the following sort (e.g. /b/2351871).
         // * These sections will not contribute to the difficulty.
         let mut peaks = self.get_curr_strain_peaks();
+        peaks.retain(|peak| peak > 0.0);
 
-        peaks.retain(|&peak| peak > 0.0);
+        let mut peaks = peaks.to_vec();
         peaks.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap_or(Ordering::Equal));
 
         let peak_iter = peaks.iter_mut().take(Self::REDUCED_SECTION_COUNT);

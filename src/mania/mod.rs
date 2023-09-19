@@ -89,11 +89,9 @@ impl<'map> ManiaStars<'map> {
     /// Adjust the clock rate used in the calculation.
     /// If none is specified, it will take the clock rate based on the mods
     /// i.e. 1.5 for DT, 0.75 for HT and 1.0 otherwise.
-    ///
-    /// The value cannot go below 0.001.
     #[inline]
     pub fn clock_rate(mut self, clock_rate: f64) -> Self {
-        self.clock_rate = Some(clock_rate.max(0.001));
+        self.clock_rate = Some(clock_rate);
 
         self
     }
@@ -141,7 +139,7 @@ impl<'map> ManiaStars<'map> {
 
         ManiaStrains {
             section_len: SECTION_LEN,
-            strains: strain.strain_peaks,
+            strains: strain.strain_peaks.to_vec(),
         }
     }
 }

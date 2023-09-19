@@ -172,11 +172,9 @@ impl<'map> OsuPP<'map> {
     /// Adjust the clock rate used in the calculation.
     /// If none is specified, it will take the clock rate based on the mods
     /// i.e. 1.5 for DT, 0.75 for HT and 1.0 otherwise.
-    ///
-    /// The value cannot go below 0.001.
     #[inline]
     pub fn clock_rate(mut self, clock_rate: f64) -> Self {
-        self.clock_rate = Some(clock_rate.max(0.001));
+        self.clock_rate = Some(clock_rate);
 
         self
     }
@@ -495,7 +493,8 @@ impl OsuPpInner {
         if self.attrs.n_sliders > 0 {
             let estimate_slider_ends_dropped =
                 ((self.state.n100 + self.state.n50 + self.state.n_misses)
-                    .min(self.attrs.max_combo - self.state.max_combo) as f64)
+                    .min(self.attrs.max_combo.saturating_sub(self.state.max_combo))
+                    as f64)
                     .clamp(0.0, estimate_diff_sliders);
             let slider_nerf_factor = (1.0 - self.attrs.slider_factor)
                 * (1.0 - estimate_slider_ends_dropped / estimate_diff_sliders).powi(3)

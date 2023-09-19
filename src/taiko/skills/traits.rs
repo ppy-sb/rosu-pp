@@ -1,8 +1,11 @@
 use std::{cmp::Ordering, mem};
 
-use crate::taiko::{
-    difficulty_object::{ObjectLists, TaikoDifficultyObject},
-    SECTION_LEN,
+use crate::{
+    taiko::{
+        difficulty_object::{ObjectLists, TaikoDifficultyObject},
+        SECTION_LEN,
+    },
+    util::CompactVec,
 };
 
 pub(crate) trait Skill: Sized {
@@ -13,7 +16,7 @@ pub(crate) trait Skill: Sized {
 pub(crate) trait StrainSkill: Skill {
     const DECAY_WEIGHT: f64 = 0.9;
 
-    fn strain_peaks_mut(&mut self) -> &mut Vec<f64>;
+    fn strain_peaks_mut(&mut self) -> &mut CompactVec;
     fn curr_section_peak(&mut self) -> &mut f64;
     fn curr_section_end(&mut self) -> &mut f64;
 
@@ -24,7 +27,7 @@ pub(crate) trait StrainSkill: Skill {
     fn process(&mut self, curr: &TaikoDifficultyObject, hit_objects: &ObjectLists) {
         // * The first object doesn't generate a strain, so we begin with an incremented section end
         if curr.idx == 0 {
-            let section_len = SECTION_LEN as f64;
+            let section_len = SECTION_LEN;
             *self.curr_section_end() = (curr.start_time / section_len).ceil() * section_len;
         }
 
@@ -36,7 +39,21 @@ pub(crate) trait StrainSkill: Skill {
                 self.start_new_section_from(section_end, curr);
             }
 
-            *self.curr_section_end() += SECTION_LEN as f64;
+            *self.curr_section_end() += SECTION_LEN;
+
+            // Optimization to finish the loop early if
+            // the current peak is 0.0 i.e. it can't decay further.
+            // If final values don't coincide perfectly anymore,
+            // this should be looked at and maybe adjusted.
+            if self.curr_section_peak().abs() <= f64::EPSILON
+                && curr.start_time > *self.curr_section_end()
+            {
+                let remaining_time = curr.start_time - *self.curr_section_end();
+                let remaining_iters = (remaining_time / SECTION_LEN).ceil();
+                *self.curr_section_end() += remaining_iters * SECTION_LEN;
+                self.strain_peaks_mut()
+                    .push_n(0.0, remaining_iters as usize);
+            }
         }
 
         *self.curr_section_peak() = self
@@ -65,8 +82,8 @@ pub(crate) trait StrainSkill: Skill {
         // * Sections with 0 strain are excluded to avoid worst-case time complexity of the following sort (e.g. /b/2351871).
         // * These sections will not contribute to the difficulty.
         let mut peaks = self.get_curr_strain_peaks();
-
-        peaks.retain(|&peak| peak > 0.0);
+        peaks.retain(|peak| peak > 0.0);
+        let mut peaks = peaks.to_vec();
         peaks.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap_or(Ordering::Equal));
 
         // * Difficulty is the weighted sum of the highest strains from every section.
@@ -80,7 +97,7 @@ pub(crate) trait StrainSkill: Skill {
     }
 
     #[inline]
-    fn get_curr_strain_peaks(mut self) -> Vec<f64> {
+    fn get_curr_strain_peaks(mut self) -> CompactVec {
         let curr_peak = *self.curr_section_peak();
         let mut strain_peaks = mem::take(self.strain_peaks_mut());
         strain_peaks.push(curr_peak);

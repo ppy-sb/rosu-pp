@@ -1,8 +1,20 @@
 ## Upcoming
 
-Nothing as of now
+  Nothing as of now
 
-# v0.9.4 (2023-02-09)
+# v0.9.5 (2023-09-06)
+
+- __Additions:__
+  - Added the method `{AnyStars/AnyPP}::is_convert` which **needs** to be used if the map was manually converted beforehand
+
+- __Adjustments:__
+  - Specified clock rates can go below 0.001 again
+
+- __Fixes:__
+  - Fixed underflow for osu!std scores that were FCs but quit mid-slider
+  - Fixed panic on incorrect file headers ([#21])
+
+## v0.9.4 (2023-02-09)
 
 - __Additions:__
   - Added the method `{TaikoPP/ManiaPP}::is_convert` which **needs** to be used if the map was manually converted beforehand
@@ -243,4 +255,5 @@ Big changes including the most recent [osu!](https://osu.ppy.sh/home/news/2022-0
 [#14]: https://github.com/MaxOhn/rosu-pp/pull/14
 [#15]: https://github.com/MaxOhn/rosu-pp/pull/15
 [#18]: https://github.com/MaxOhn/rosu-pp/pull/18
-#[#20]: https://github.com/MaxOhn/rosu-pp/pull/20
+[#20]: https://github.com/MaxOhn/rosu-pp/pull/20
+[#21]: https://github.com/MaxOhn/rosu-pp/pull/21
