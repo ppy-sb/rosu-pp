@@ -590,9 +590,12 @@ impl OsuPerformanceInner {
         // * Penalize misses by assessing # of misses relative to the total # of objects.
         // * Default a 3% reduction for any # of misses.
         if self.effective_miss_count > 0.0 {
+            let decay_power = if self.mods.rx() { 0.5 } else { 0.775 };
+            let growth_power = if self.mods.rx() { 1.0 + (self.effective_miss_count / 1.5) } else { self.effective_miss_count };
+            
             aim_value *= 0.97
-                * (1.0 - (self.effective_miss_count / total_hits).powf(0.775))
-                    .powf(self.effective_miss_count);
+                * (1.0 - (self.effective_miss_count / total_hits).powf(decay_power))
+                    .powf(growth_power);
         }
 
         aim_value *= self.get_combo_scaling_factor();
