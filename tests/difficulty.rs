@@ -53,6 +53,7 @@ macro_rules! test_cases {
             ar: $ar,
             od: $od,
             hp: $hp,
+            cs: 0.0,
             n_circles: $n_circles,
             n_sliders: $n_sliders,
             n_spinners: $n_spinners,
