@@ -34,6 +34,7 @@ pub fn difficulty(difficulty: &Difficulty, converted: &OsuBeatmap<'_>) -> OsuDif
                 aim_no_sliders,
                 speed,
                 flashlight,
+                relax,
             },
         mut attrs,
     } = DifficultyValues::calculate(difficulty, converted);
@@ -43,6 +44,7 @@ pub fn difficulty(difficulty: &Difficulty, converted: &OsuBeatmap<'_>) -> OsuDif
     let speed_relevant_note_count = speed.relevant_note_count();
     let speed_difficulty_value = speed.difficulty_value();
     let flashlight_difficulty_value = flashlight.difficulty_value();
+    let relax_difficulty_value = relax.difficulty_value();
 
     let mods = difficulty.get_mods();
 
@@ -54,6 +56,7 @@ pub fn difficulty(difficulty: &Difficulty, converted: &OsuBeatmap<'_>) -> OsuDif
         speed_difficulty_value,
         speed_relevant_note_count,
         flashlight_difficulty_value,
+        relax_difficulty_value,
     );
 
     attrs
@@ -128,6 +131,7 @@ impl DifficultyValues {
             let mut aim_no_sliders = Skill::new(&mut skills.aim_no_sliders, &diff_objects);
             let mut speed = Skill::new(&mut skills.speed, &diff_objects);
             let mut flashlight = Skill::new(&mut skills.flashlight, &diff_objects);
+            let mut relax = Skill::new(&mut skills.relax, &diff_objects);
 
             // The first hit object has no difficulty object
             let take_diff_objects = cmp::min(converted.hit_objects.len(), take).saturating_sub(1);
@@ -137,6 +141,7 @@ impl DifficultyValues {
                 aim_no_sliders.process(hit_object);
                 speed.process(hit_object);
                 flashlight.process(hit_object);
+                relax.process(hit_object);
             }
         }
 
@@ -152,11 +157,17 @@ impl DifficultyValues {
         speed_difficulty_value: f64,
         speed_relevant_note_count: f64,
         flashlight_difficulty_value: f64,
+        relax_difficulty_value: f64,
     ) {
         let mut aim_rating = aim_difficulty_value.sqrt() * DIFFICULTY_MULTIPLIER;
         let aim_rating_no_sliders = aim_no_sliders_difficulty_value.sqrt() * DIFFICULTY_MULTIPLIER;
         let mut speed_rating = speed_difficulty_value.sqrt() * DIFFICULTY_MULTIPLIER;
         let mut flashlight_rating = flashlight_difficulty_value.sqrt() * DIFFICULTY_MULTIPLIER;
+
+        if mods.rx() {
+            aim_rating = relax_difficulty_value.sqrt() * DIFFICULTY_MULTIPLIER;
+            speed_rating = 0f64; // no speed rating for relax.
+        }
 
         let slider_factor = if aim_rating > 0.0 {
             aim_rating_no_sliders / aim_rating
