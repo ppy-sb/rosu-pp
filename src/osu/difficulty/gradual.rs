@@ -177,6 +177,7 @@ impl Iterator for OsuGradualDifficulty {
         let speed_relevant_note_count = self.skills.speed.relevant_note_count();
         let speed_difficulty_value = self.skills.speed.as_difficulty_value();
         let flashlight_difficulty_value = self.skills.flashlight.as_difficulty_value();
+        let relax_difficulty_value = self.skills.relax.as_difficulty_value();
 
         DifficultyValues::eval(
             &mut attrs,
@@ -186,6 +187,7 @@ impl Iterator for OsuGradualDifficulty {
             &speed_difficulty_value,
             speed_relevant_note_count,
             flashlight_difficulty_value,
+            relax_difficulty_value,
         );
 
         Some(attrs)
