@@ -849,7 +849,8 @@ impl OsuPerformanceInner {
 
         let total_hits = self.total_hits();
 
-        let len_bonus = 0.95
+        let len_bonus_basis = if self.mods.rx() { 0.88 } else { 0.95 };
+        let len_bonus = len_bonus_basis
             + 0.4 * (total_hits / 2000.0).min(1.0)
             + f64::from(u8::from(total_hits > 2000.0)) * (total_hits / 2000.0).log10() * 0.5;
 
@@ -866,10 +867,11 @@ impl OsuPerformanceInner {
 
         aim_value *= self.get_combo_scaling_factor();
 
+        let lowar_factor_basis = if self.mods.rx() { 0.025 } else { 0.05 };
         let ar_factor = if self.attrs.ar > 10.33 {
             0.3 * (self.attrs.ar - 10.33)
         } else if self.attrs.ar < 8.0 {
-            0.05 * (8.0 - self.attrs.ar)
+            lowar_factor_basis * (8.0 - self.attrs.ar)
         } else {
             0.0
         };
@@ -885,7 +887,19 @@ impl OsuPerformanceInner {
                     * (1.0 - 0.003 * self.attrs.hp * self.attrs.hp);
         } else if self.mods.hd() || self.mods.tc() {
             // * We want to give more reward for lower AR when it comes to aim and HD. This nerfs high AR and buffs lower AR.
-            aim_value *= 1.0 + 0.04 * (12.0 - self.attrs.ar);
+            let hd_factor = if self.mods.rx() { 1.0 + 0.05 * (11.0 - self.attrs.ar) } else { 1.0 + 0.04 * (12.0 - self.attrs.ar) };
+            aim_value *= hd_factor;
+        }
+
+        // * EZ bonus
+        if self.mods.ez() && self.mods.rx() {
+            let mut base_buff = 1.08_f64;
+
+            if self.attrs.ar <= 8.0 {
+                base_buff += (7.0 - self.attrs.ar) / 100.0;
+            }
+
+            aim_value *= base_buff;
         }
 
         // * We assume 15% of sliders in a map are difficult since there's no way to tell from the performance calculator.
@@ -916,7 +930,7 @@ impl OsuPerformanceInner {
             aim_value *= slider_nerf_factor;
         }
 
-        aim_value *= self.acc;
+        aim_value *= if self.mods.rx() { 0.3 + self.acc / 2.0 } else { self.acc };
         // * It is important to consider accuracy difficulty when scaling with accuracy.
         aim_value *= 0.98 + self.attrs.od.powf(2.0) / 2500.0;
 
