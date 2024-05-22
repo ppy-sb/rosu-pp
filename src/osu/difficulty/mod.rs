@@ -184,11 +184,6 @@ impl DifficultyValues {
             flashlight_rating = flashlight_rating.powf(0.8);
         }
 
-        if mods.rx() {
-            aim_rating *= 0.9;
-            speed_rating = 0.0;
-            flashlight_rating *= 0.7;
-        }
 
         let base_aim_performance = OsuStrainSkill::difficulty_to_performance(aim_rating);
         let base_speed_performance = OsuStrainSkill::difficulty_to_performance(speed_rating);
