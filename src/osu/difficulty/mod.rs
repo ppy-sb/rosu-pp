@@ -169,12 +169,6 @@ impl DifficultyValues {
             flashlight_rating = flashlight_rating.powf(0.8);
         }
 
-        if mods.rx() {
-            aim_rating *= 0.9;
-            speed_rating = 0.0;
-            flashlight_rating *= 0.7;
-        }
-
         let base_aim_performance =
             (5.0 * (aim_rating / 0.0675).max(1.0) - 4.0).powf(3.0) / 100_000.0;
         let base_speed_performance =
