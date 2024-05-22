@@ -902,6 +902,11 @@ impl OsuPerformanceInner {
             aim_value *= base_buff;
         }
 
+        // Precision buff (reading)
+        if self.attrs.cs > 5.58 && self.mods.rx() {
+            aim_value *= ((self.attrs.cs - 5.46).powf(1.8) + 1.0).powf(0.03);
+        }
+
         // * We assume 15% of sliders in a map are difficult since there's no way to tell from the performance calculator.
         let estimate_diff_sliders = f64::from(self.attrs.n_sliders) * 0.15;
 
