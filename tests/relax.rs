@@ -5,14 +5,30 @@ use std::{collections::HashMap, sync::Mutex};
 
 use rosu_pp::{Beatmap, Difficulty};
 
-const TEST_CASES: [(&str, u32, Difficulty); 7] = [
+const TEST_CASES: [(&str, u32, Difficulty); 23] = [
     ("Sunglow", 2486881, Difficulty::new().mods(200)), // HDDTRX
     ("Sidetracked Day", 1537566, Difficulty::new().mods(200)), // HDDTRX
     ("Team Magma", 2097898, Difficulty::new().mods(200)), // HDDTRX
     ("Kimi no Kioku", 1045757, Difficulty::new().mods(200)), // HDDTRX
     ("ROR", 869222, Difficulty::new().mods(200)),      // HDDTRX
     ("Euphoria", 1861487, Difficulty::new().mods(144)), // HRRX
-    ("Genryuu Kaiko", 433005, Difficulty::new().mods(144)), // HDDTRX
+    ("Oshama Scramble", 1972244, Difficulty::new().mods(144)), // HRRX
+    ("The Sun The Moon", 1949106, Difficulty::new().mods(200)), // HRRX
+    ("Roar of The Jungle", 3306465, Difficulty::new().mods(200)), // HDDTRX
+    ("Cosmic cortex", 787307, Difficulty::new().mods(200)), // HDDTRX
+    ("Chronostasis", 2874408, Difficulty::new().mods(200)), // HDDTRX
+    ("quaver", 918723, Difficulty::new().mods(200)), // HDDTRX
+    ("raise my sword", 1860169, Difficulty::new().mods(200)), // HDDTRX
+    ("Hardware Store", 1989203, Difficulty::new().mods(216)), // HDHRDTRX
+    ("Songs Compilation", 1849580, Difficulty::new().mods(200)), // HDDTRX
+    ("Shinryu Monogatari", 2818772, Difficulty::new().mods(144)), // HRRX
+    ("THE PLATINUM", 4352925, Difficulty::new().mods(128)), // RX
+    ("Charge-Parity", 4349848, Difficulty::new().mods(128)), // RX
+    ("Fallen Symphony", 4042579, Difficulty::new().mods(128)), // RX
+    ("TERRAFORGE", 4439703, Difficulty::new().mods(128)), // RX
+    ("Lovely Icecream", 1415526, Difficulty::new().mods(144)), // HRRX
+    ("Scarlet Rose", 131564, Difficulty::new().mods(200)), // HDDTRX
+    ("True truly love", 955615, Difficulty::new().mods(128)), // RX
 ];
 
 lazy_static! {
