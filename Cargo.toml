@@ -20,6 +20,9 @@ tracing = ["rosu-map/tracing"]
 rosu-map = { version = "0.2.0" }
 rosu-mods = { version = "0.2.0" }
 
+[dependencies.lazy_static]
+git = "https://github.com/Kimundi/lazy-static.rs"
+
 [dev-dependencies]
 proptest = "1.4.0"
 
