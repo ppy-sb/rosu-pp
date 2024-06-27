@@ -19,6 +19,9 @@ tracing = ["rosu-map/tracing"]
 [dependencies]
 rosu-map = { version = "0.1.1" }
 
+[dependencies.lazy_static]
+git = "https://github.com/Kimundi/lazy-static.rs"
+
 [dev-dependencies]
 proptest = "1.4.0"
 
