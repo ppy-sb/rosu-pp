@@ -14,21 +14,21 @@ const TEST_CASES: [(&str, u32, Difficulty); 23] = [
     ("Euphoria", 1861487, Difficulty::new().mods(144)), // HRRX
     ("Oshama Scramble", 1972244, Difficulty::new().mods(144)), // HRRX
     ("The Sun The Moon", 1949106, Difficulty::new().mods(200)), // HRRX
-    ("Roar of The Jungle", 3722572, Difficulty::new().mods(200)), // HDDTRX
+    ("Roar of The Jungle", 3306465, Difficulty::new().mods(200)), // HDDTRX
     ("Cosmic cortex", 787307, Difficulty::new().mods(200)), // HDDTRX
     ("Chronostasis", 2874408, Difficulty::new().mods(200)), // HDDTRX
     ("quaver", 918723, Difficulty::new().mods(200)), // HDDTRX
     ("raise my sword", 1860169, Difficulty::new().mods(200)), // HDDTRX
-    ("Hardware Store", 1989203, Difficulty::new().mods(216)), // HDDTRX
+    ("Hardware Store", 1989203, Difficulty::new().mods(216)), // HDHRDTRX
     ("Songs Compilation", 1849580, Difficulty::new().mods(200)), // HDDTRX
     ("Shinryu Monogatari", 2818772, Difficulty::new().mods(144)), // HRRX
-    ("THE PLATINUM", 4352925, Difficulty::new().mods(0)), // RX
-    ("Charge-Parity", 4349848, Difficulty::new().mods(0)), // RX
-    ("Fallen Symphony", 4042579, Difficulty::new().mods(0)), // RX
-    ("TERRAFORGE", 4439703, Difficulty::new().mods(0)), // RX
+    ("THE PLATINUM", 4352925, Difficulty::new().mods(128)), // RX
+    ("Charge-Parity", 4349848, Difficulty::new().mods(128)), // RX
+    ("Fallen Symphony", 4042579, Difficulty::new().mods(128)), // RX
+    ("TERRAFORGE", 4439703, Difficulty::new().mods(128)), // RX
     ("Lovely Icecream", 1415526, Difficulty::new().mods(144)), // HRRX
     ("Scarlet Rose", 131564, Difficulty::new().mods(200)), // HDDTRX
-    ("True truly love", 955615, Difficulty::new().mods(0)), // RX
+    ("True truly love", 955615, Difficulty::new().mods(128)), // RX
 ];
 
 lazy_static! {
