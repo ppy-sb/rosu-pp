@@ -189,8 +189,10 @@ impl RelaxAimEvaluator {
                 if osu_curr_obj.strain_time > 100.0 {
                     acute_angle_bonus = 0.0;
                 } else {
-                    let base1 =
-                        (FRAC_PI_2 * ((100.0 - osu_curr_obj.strain_time) / 25.0).min(1.0)).sin();
+                    // * Penalize deltaTime since relax is eaiser to hit at that BPM.
+                    let slower_strain_time = osu_curr_obj.strain_time * 1.2;
+
+                    let base1 = (FRAC_PI_2 * ((120.0 - slower_strain_time) / 25.0).min(1.0)).sin();
 
                     let base2 = (FRAC_PI_2
                         * ((osu_curr_obj.lazy_jump_dist).clamp(50.0, 100.0) - 50.0)
@@ -200,7 +202,7 @@ impl RelaxAimEvaluator {
                     // * Multiply by previous angle, we don't want to buff unless this is a wiggle type pattern.
                     acute_angle_bonus *= Self::calc_acute_angle_bonus(last_angle)
                     // * The maximum velocity we buff is equal to 125 / strainTime
-                        * angle_bonus.min(125.0 / osu_curr_obj.strain_time)
+                        * angle_bonus.min(125.0 / slower_strain_time)
                         // * scale buff from 150 bpm 1/4 to 200 bpm 1/4
                         * base1.powf(2.0)
                          // * Buff distance exceeding 50 (radius) up to 100 (diameter).
