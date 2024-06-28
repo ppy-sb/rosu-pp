@@ -2,15 +2,24 @@
 
 strain_time: the real delta time(ms) between two hit objects. e.g. 300BPM Jump: 60 / 300 * 1/2 = 100, 200BPM Stream: 60 / 200 * 1/4 = 75.
 
-hit_window: combination of strain_time and overall_difficulty, representing the hit range that players should follow.
+hit_window: overall_difficulty, representing the hit range that players should follow.
 
 ### Ideas
 
-1. SPD should be considered in AIM skills, instead of zero or a individual skills.
-2. Strain_time should be nerfed, since relax is not so that sensitive with velocity.
-3. We don't want to consider wide angle stream as a hard pattern, since it's much easier in relax.
+1. Nerf wide angle stream (circle stream), since it's much easier in relax.
+1. Nerf velocity bonus in acute angle calculation, since relax is not so that sensitive with velocity.
+1. Include relax rhythm evaluator
+1. Nerf velocity bonus in wide angle stream calculation, since relax is not so that sensitive with velocity.
 
 ### Changes
 
-1. Including all post calculation from Akatsuki PP.
-2. Removing all post relax calculation from PPY Formula.
+1. Remove all post calculation from ppy formula.
+1. Include all post calculation from akatsuki formula.
+1. Include relax rhythm evaluator.
+1. Adjust multipliers to bonus VELOCITY_CHANGE and SLIDER.
+1. Nerf round stream (aka. wide angle stream).
+1. Nerf velocity bonus in acute angle.
+
+### Ongoing Changes
+
+- Nerf velocity bonus in round stream.
