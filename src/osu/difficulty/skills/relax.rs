@@ -106,9 +106,8 @@ impl<'a> Skill<'a, Relax> {
     fn strain_value_at(&mut self, curr: &'a OsuDifficultyObject<'a>) -> f64 {
         self.inner.curr_strain *= strain_decay(curr.delta_time, STRAIN_DECAY_BASE);
         self.inner.curr_strain +=
-            RelaxAimEvaluator::evaluate_diff_of(curr, self.diff_objects) * SKILL_MULTIPLIER;
-        self.inner.curr_strain +=
-            RelaxRhythmEvaluator::evaluate_diff_of(curr, self.diff_objects, self.inner.hit_window);
+            RelaxAimEvaluator::evaluate_diff_of(curr, self.diff_objects, self.inner.hit_window)
+                * SKILL_MULTIPLIER;
 
         self.inner.curr_strain
     }
@@ -125,6 +124,7 @@ impl RelaxAimEvaluator {
     fn evaluate_diff_of<'a>(
         curr: &'a OsuDifficultyObject<'a>,
         diff_objects: &'a [OsuDifficultyObject<'a>],
+        hit_window: f64,
     ) -> f64 {
         let osu_curr_obj = curr;
 
@@ -266,6 +266,11 @@ impl RelaxAimEvaluator {
         );
 
         aim_strain += slider_bonus * Self::SLIDER_MULTIPLIER;
+
+        // * If the distance is small enough, we want to buff the rhythm complexity.
+        if osu_curr_obj.lazy_jump_dist < 350.0 {
+            aim_strain *= RelaxRhythmEvaluator::evaluate_diff_of(curr, diff_objects, hit_window);
+        }
 
         aim_strain
     }

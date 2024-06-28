@@ -23,7 +23,7 @@ const TEST_CASES: [(&str, u32, Difficulty, u32); 23] = [
         "Roar of The Jungle",
         3306465,
         Difficulty::new().mods(200),
-        2500,
+        3400,
     ), // HDDTRX
     ("Cosmic cortex", 787307, Difficulty::new().mods(200), 1350), // HDDTRX
     ("Chronostasis", 2874408, Difficulty::new().mods(200), 1950), // HDDTRX
