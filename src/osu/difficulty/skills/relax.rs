@@ -1,4 +1,7 @@
-use std::{cmp, f64::consts::{FRAC_PI_2, PI}};
+use std::{
+    cmp,
+    f64::consts::{FRAC_PI_2, PI},
+};
 
 use crate::{
     any::difficulty::{
@@ -208,6 +211,13 @@ impl RelaxAimEvaluator {
                 wide_angle_bonus *= angle_bonus
                     * (1.0
                         - wide_angle_bonus.min(Self::calc_wide_angle_bonus(last_angle).powf(3.0)));
+
+                // * Penalize wide angles if their distances are quite small (consider as wide angle stream).
+                // * Only jump dist is considered here, not velocity.
+                // * Fittings: [(100, 0.4), (200, 0.5), (300, 0.7), (350, 1)] power function.
+                let wide_stream_nerf = osu_curr_obj.lazy_jump_dist.powf(0.664) * 0.017;
+                wide_angle_bonus *= wide_stream_nerf.clamp(0.4, 1.0);
+
                 // * Penalize acute angles if they're repeated, reducing the penalty as the lastLastAngle gets more obtuse.
                 acute_angle_bonus *= 0.5
                     + 0.5
