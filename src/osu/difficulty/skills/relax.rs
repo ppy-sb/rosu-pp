@@ -119,8 +119,8 @@ struct RelaxAimEvaluator;
 impl RelaxAimEvaluator {
     const WIDE_ANGLE_MULTIPLIER: f64 = 1.5;
     const ACUTE_ANGLE_MULTIPLIER: f64 = 1.95;
-    const SLIDER_MULTIPLIER: f64 = 1.35;
-    const VELOCITY_CHANGE_MULTIPLIER: f64 = 0.75;
+    const SLIDER_MULTIPLIER: f64 = 1.5;
+    const VELOCITY_CHANGE_MULTIPLIER: f64 = 1.2;
 
     fn evaluate_diff_of<'a>(
         curr: &'a OsuDifficultyObject<'a>,
