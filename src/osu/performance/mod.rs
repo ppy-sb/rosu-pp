@@ -956,7 +956,7 @@ impl OsuPerformanceInner {
         aim_value *= 0.98 + self.attrs.od.powf(2.0) / 2500.0;
 
         if self.mods.rx() && !self.mods.dt() {
-            aim_value *= 1.1
+            aim_value *= 1.2
         }
 
         aim_value
