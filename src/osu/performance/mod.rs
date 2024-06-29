@@ -592,8 +592,12 @@ impl OsuPerformanceInner {
         // * Default a 3% reduction for any # of misses.
         if self.effective_miss_count > 0.0 {
             let decay_power = if self.mods.rx() { 0.5 } else { 0.775 };
-            let growth_power = if self.mods.rx() { 1.0 + (self.effective_miss_count / 1.5) } else { self.effective_miss_count };
-            
+            let growth_power = if self.mods.rx() {
+                1.0 + (self.effective_miss_count / 1.5)
+            } else {
+                self.effective_miss_count
+            };
+
             aim_value *= 0.97
                 * (1.0 - (self.effective_miss_count / total_hits).powf(decay_power))
                     .powf(growth_power);
@@ -618,7 +622,11 @@ impl OsuPerformanceInner {
 
         if self.mods.hd() {
             // * We want to give more reward for lower AR when it comes to aim and HD. This nerfs high AR and buffs lower AR.
-            let hd_factor = if self.mods.rx() { 1.0 + 0.05 * (11.0 - self.attrs.ar) } else { 1.0 + 0.04 * (12.0 - self.attrs.ar) };
+            let hd_factor = if self.mods.rx() {
+                1.0 + 0.05 * (11.0 - self.attrs.ar)
+            } else {
+                1.0 + 0.04 * (12.0 - self.attrs.ar)
+            };
             aim_value *= hd_factor;
         }
 
@@ -654,9 +662,17 @@ impl OsuPerformanceInner {
             aim_value *= slider_nerf_factor;
         }
 
-        aim_value *= if self.mods.rx() { 0.3 + self.acc / 2.0 } else { self.acc };
+        aim_value *= if self.mods.rx() {
+            0.3 + self.acc / 2.0
+        } else {
+            self.acc
+        };
         // * It is important to consider accuracy difficulty when scaling with accuracy.
         aim_value *= 0.98 + self.attrs.od.powf(2.0) / 2500.0;
+
+        if self.mods.rx() && !self.mods.dt() {
+            aim_value *= 1.1
+        }
 
         aim_value
     }

@@ -29,8 +29,8 @@ const TEST_CASES: [(&str, u32, u32, u32); 23] = [
 #[test]
 fn calculate_batch() {
     println!(
-        "{0: <20} | {1: <12} | {2: <12} | {3: <10} | {4: <10}",
-        "title", "pp", "weighted_pp", "target_pp", "delta"
+        "{0: <20} | {1: <10} | {2: <12} | {3: <12} | {4: <10} | {5: <10}",
+        "title", "mods", "pp", "weighted_pp", "target_pp", "delta"
     );
     let weight = get_weight();
     for (title, beatmap_id, mods, target_pp) in TEST_CASES {
@@ -39,8 +39,9 @@ fn calculate_batch() {
         let pp_value = performance.accuracy(99.5).mods(mods).calculate().pp();
         let pp_weighted = pp_value * weight;
         println!(
-            "{0: <20} | {1: <12} | {2: <12} | {3: <10} | {4: <10}",
+            "{0: <20} | {1: <10} | {2: <12} | {3: <12} | {4: <10} | {5: <10}",
             title,
+            mods,
             format!("{:.2}", pp_value),
             format!("{:.2}", pp_weighted),
             format!("{:.2}", target_pp),
