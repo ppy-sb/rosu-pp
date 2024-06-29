@@ -544,6 +544,8 @@ impl OsuPerformanceInner {
         let total_hits = f64::from(total_hits);
 
         let mut multiplier = PERFORMANCE_BASE_MULTIPLIER;
+        // * balance inflation of the performace value
+        let overall_weight = 1.563_f64.powf(1.05);
 
         if self.mods.nf() {
             multiplier *= (1.0 - 0.02 * self.effective_miss_count).max(0.9);
@@ -553,10 +555,10 @@ impl OsuPerformanceInner {
             multiplier *= 1.0 - (f64::from(self.attrs.n_spinners) / total_hits).powf(0.85);
         }
 
-        let aim_value = self.compute_aim_value();
-        let speed_value = self.compute_speed_value();
-        let acc_value = self.compute_accuracy_value();
-        let flashlight_value = self.compute_flashlight_value();
+        let aim_value = self.compute_aim_value() * overall_weight;
+        let speed_value = self.compute_speed_value() * overall_weight;
+        let acc_value = self.compute_accuracy_value() * overall_weight;
+        let flashlight_value = self.compute_flashlight_value() * overall_weight;
 
         let pp = (aim_value.powf(1.1)
             + speed_value.powf(1.1)
