@@ -170,6 +170,11 @@ impl RelaxAimEvaluator {
         // * Start strain with regular velocity.
         let mut aim_strain = curr_vel;
 
+        // * Penalize overall stream aim.
+        // * Fittings: [(100, 0.92), (300, 0.98)] linear function.
+        let stream_nerf = 0.0006 * osu_curr_obj.lazy_jump_dist + 0.86;
+        aim_strain *= stream_nerf.clamp(0.92, 0.98);
+
         // * If rhythms are the same.
         if osu_curr_obj.strain_time.max(osu_last_obj.strain_time)
             < 1.25 * osu_curr_obj.strain_time.min(osu_last_obj.strain_time)
