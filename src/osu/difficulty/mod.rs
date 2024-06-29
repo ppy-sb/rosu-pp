@@ -79,6 +79,7 @@ impl OsuDifficultySetup {
             ar: map_attrs.ar,
             hp: map_attrs.hp,
             od: map_attrs.od,
+            cs: map_attrs.cs,
             ..Default::default()
         };
 
