@@ -912,6 +912,11 @@ impl OsuPerformanceInner {
         // Precision buff (reading)
         if self.attrs.cs > 5.58 && self.mods.rx() {
             aim_value *= ((self.attrs.cs - 5.46).powf(1.8) + 1.0).powf(0.03);
+            // Special buff for high CS and high AR
+            if self.attrs.ar > 10.8 {
+                aim_value *= 1.0 + (self.attrs.ar - 10.8);
+                aim_value *= 1.0 + (self.attrs.cs - 6.0).clamp(0.0, 0.2);
+            }
         }
 
         // * We assume 15% of sliders in a map are difficult since there's no way to tell from the performance calculator.
