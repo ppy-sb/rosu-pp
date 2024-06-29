@@ -5,12 +5,15 @@ const TEST_CASES: [(&str, u32, u32, u32); 23] = [
     ("Sidetracked Day", 1537566, 200, 1100),    // HDDTRX
     ("Team Magma", 2097898, 200, 870),          // HDDTRX
     ("Kimi no Kioku", 1045757, 200, 750),       // HDDTRX
+    ("Scarlet Rose", 131564, 200, 600),         // HDDTRX
     ("ROR", 869222, 200, 1250),                 // HDDTRX
-    ("Euphoria", 1861487, 144, 1050),           // HRRX
-    ("Genryuu Kaiko", 433005, 144, 900),        // HRRX
-    ("The Sun The Moon", 1949106, 200, 1900),   // HRRX
+    ("Euphoria", 1861487, 144, 1150),           // HRRX
+    ("Genryuu Kaiko", 433005, 144, 950),        // HRRX
+    ("Lovely Icecream", 1415526, 144, 650),     // HRRX
+    ("True truly love", 955615, 128, 850),      // RX
+    ("The Sun The Moon", 1949106, 200, 1900),   // HDDTRX
     ("Roar of The Jungle", 3306465, 200, 3400), // HDDTRX
-    ("Cosmic cortex", 787307, 200, 1350),       // HDDTRX
+    ("Cosmic cortex", 787307, 200, 1600),       // HDDTRX
     ("Chronostasis", 2874408, 200, 1950),       // HDDTRX
     ("quaver", 918723, 200, 1750),              // HDDTRX
     ("raise my sword", 1860169, 200, 1350),     // HDDTRX
@@ -21,9 +24,6 @@ const TEST_CASES: [(&str, u32, u32, u32); 23] = [
     ("Charge-Parity", 4349848, 128, 1000),      // RX
     ("Fallen Symphony", 4042579, 128, 1000),    // RX
     ("TERRAFORGE", 4439703, 128, 1150),         // RX
-    ("Lovely Icecream", 1415526, 144, 700),     // HRRX
-    ("Scarlet Rose", 131564, 200, 600),         // HDDTRX
-    ("True truly love", 955615, 128, 825),      // RX
 ];
 
 #[test]
