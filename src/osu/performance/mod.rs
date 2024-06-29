@@ -890,7 +890,11 @@ impl OsuPerformanceInner {
                     * (1.0 - 0.003 * self.attrs.hp * self.attrs.hp);
         } else if self.mods.hd() || self.mods.tc() {
             // * We want to give more reward for lower AR when it comes to aim and HD. This nerfs high AR and buffs lower AR.
-            let hd_factor = if self.mods.rx() { 1.0 + 0.05 * (11.0 - self.attrs.ar) } else { 1.0 + 0.04 * (12.0 - self.attrs.ar) };
+            let hd_factor = if self.mods.rx() {
+                1.0 + 0.05 * (11.0 - self.attrs.ar)
+            } else {
+                1.0 + 0.04 * (12.0 - self.attrs.ar)
+            };
             aim_value *= hd_factor;
         }
 
@@ -938,9 +942,17 @@ impl OsuPerformanceInner {
             aim_value *= slider_nerf_factor;
         }
 
-        aim_value *= if self.mods.rx() { 0.3 + self.acc / 2.0 } else { self.acc };
+        aim_value *= if self.mods.rx() {
+            0.3 + self.acc / 2.0
+        } else {
+            self.acc
+        };
         // * It is important to consider accuracy difficulty when scaling with accuracy.
         aim_value *= 0.98 + self.attrs.od.powf(2.0) / 2500.0;
+
+        if self.mods.rx() && !self.mods.dt() {
+            aim_value *= 1.1
+        }
 
         aim_value
     }

@@ -19,6 +19,7 @@ hit_window: overall_difficulty, representing the hit range that players should f
 1. Adjust multipliers to bonus VELOCITY_CHANGE and SLIDER.
 1. Nerf round stream (aka. wide angle stream).
 1. Nerf velocity bonus in acute angle.
+1. Bonus scores that doesn't enable DT.
 
 ### Ongoing Changes
 
