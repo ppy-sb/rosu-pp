@@ -545,7 +545,7 @@ impl OsuPerformanceInner {
 
         let mut multiplier = PERFORMANCE_BASE_MULTIPLIER;
         // * balance inflation of the performace value
-        let overall_weight = 1.563_f64.powf(1.05);
+        let overall_weight = if self.mods.rx() { 1.6 } else { 1.0 };
 
         if self.mods.nf() {
             multiplier *= (1.0 - 0.02 * self.effective_miss_count).max(0.9);
