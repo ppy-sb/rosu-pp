@@ -9,6 +9,7 @@ pub trait Mods: Copy {
     fn ht(self) -> bool;
     fn fl(self) -> bool;
     fn so(self) -> bool;
+    fn ap(self) -> bool;
 
     fn clock_rate(self) -> f64 {
         if self.dt() {
@@ -50,4 +51,5 @@ impl Mods for u32 {
     impl_mods_fn!(ht, 1 << 8);
     impl_mods_fn!(fl, 1 << 10);
     impl_mods_fn!(so, 1 << 12);
+    impl_mods_fn!(ap, 1 << 13);
 }
