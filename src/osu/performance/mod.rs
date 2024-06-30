@@ -832,12 +832,19 @@ impl OsuPerformanceInner {
             acc_value *= 1.42;
         }
 
-        let pp = (aim_value.powf(1.1)
+        let mut pp = (aim_value.powf(1.1)
             + speed_value.powf(1.1)
             + acc_value.powf(1.1)
             + flashlight_value.powf(1.1))
         .powf(1.0 / 1.1)
             * multiplier;
+
+        if self.mods.ap() {
+            // * Implement AP scaling for the performance value.
+            pp = (speed_value.powf(1.12) + acc_value.powf(1.12) + flashlight_value.powf(1.05))
+                .powf(1.0 / 1.1)
+                * multiplier
+        }
 
         OsuPerformanceAttributes {
             difficulty: self.attrs,
