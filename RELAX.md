@@ -15,12 +15,11 @@ hit_window: overall_difficulty, representing the hit range that players should f
 
 1. Remove all post calculation from ppy formula.
 1. Include all post calculation from akatsuki formula.
-1. Include relax rhythm evaluator.
+1. Remove SPD calculation in relax.
+1. Apply rhythm evaluator to narrow distance objects in AIM.
+1. Nerf overall narrow distance (<200mm) streams in AIM.
+1. Nerf round stream in wide angle bonus.
+1. Nerf velocity bonus in acute angle bonus.
 1. Adjust multipliers to bonus VELOCITY_CHANGE and SLIDER.
-1. Nerf round stream (aka. wide angle stream).
-1. Nerf velocity bonus in acute angle.
 1. Bonus scores that doesn't enable DT.
-
-### Ongoing Changes
-
-- Nerf velocity bonus in round stream.
+1. Inflat the final performance value.
