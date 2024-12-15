@@ -878,11 +878,6 @@ impl OsuPerformanceInner<'_> {
             );
         }
 
-        // * Remove combo scaling for relax.
-        if !self.mods.rx() {
-            aim_value *= self.get_combo_scaling_factor();
-        }
-
         let lowar_factor_basis = if self.mods.rx() { 0.025 } else { 0.05 };
         let ar_factor = if self.attrs.ar > 10.33 {
             0.3 * (self.attrs.ar - 10.33)
