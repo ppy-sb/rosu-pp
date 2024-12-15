@@ -798,7 +798,7 @@ struct OsuPerformanceInner<'mods> {
     using_classic_slider_acc: bool,
 }
 
-impl OsuPerformanceInner {
+impl OsuPerformanceInner<'_> {
     fn calculate(self) -> OsuPerformanceAttributes {
         let total_hits = self.state.total_hits();
 
@@ -968,7 +968,7 @@ impl OsuPerformanceInner {
         // * It is important to consider accuracy difficulty when scaling with accuracy.
         aim_value *= 0.98 + self.attrs.od.powf(2.0) / 2500.0;
 
-        if self.mods.rx() && !self.mods.dt() {
+        if self.mods.rx() && self.mods.clock_rate() < 1.5 {
             aim_value *= 1.2
         }
 

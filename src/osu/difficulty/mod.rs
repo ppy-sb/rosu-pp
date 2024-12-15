@@ -67,7 +67,7 @@ pub fn difficulty(
         &speed_difficulty_value,
         speed_relevant_note_count,
         flashlight_difficulty_value,
-        relax_difficulty_value,
+        &relax_difficulty_value,
     );
 
     Ok(attrs)
@@ -169,7 +169,7 @@ impl DifficultyValues {
         speed: &UsedOsuStrainSkills<DifficultyValue>,
         speed_relevant_note_count: f64,
         flashlight_difficulty_value: f64,
-        relax_difficulty_value: f64,
+        relax: &UsedOsuStrainSkills<DifficultyValue>,
     ) {
         let mut aim_rating = aim.difficulty_value().sqrt() * DIFFICULTY_MULTIPLIER;
         let aim_rating_no_sliders =
@@ -178,7 +178,7 @@ impl DifficultyValues {
         let mut flashlight_rating = flashlight_difficulty_value.sqrt() * DIFFICULTY_MULTIPLIER;
 
         if mods.rx() {
-            aim_rating = relax_difficulty_value.sqrt() * DIFFICULTY_MULTIPLIER;
+            aim_rating = relax.difficulty_value().sqrt() * DIFFICULTY_MULTIPLIER;
             speed_rating = 0f64; // no speed rating for relax.
         }
 

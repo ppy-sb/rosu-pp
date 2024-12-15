@@ -303,6 +303,7 @@ impl_has_mod! {
     hd: + Hidden ["Hidden"],
     hr: + HardRock ["HardRock"],
     rx: + Relax ["Relax"],
+    ap: + Autopilot ["AutoPilot"],
     fl: + Flashlight ["Flashlight"],
     so: + SpunOut ["SpunOut"],
     bl: - Blinds ["Blinds"],

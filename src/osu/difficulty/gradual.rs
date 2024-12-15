@@ -187,7 +187,7 @@ impl Iterator for OsuGradualDifficulty {
             &speed_difficulty_value,
             speed_relevant_note_count,
             flashlight_difficulty_value,
-            relax_difficulty_value,
+            &relax_difficulty_value,
         );
 
         Some(attrs)

@@ -12,7 +12,7 @@ use crate::{
     util::{float_ext::FloatExt, strains_vec::StrainsVec},
 };
 
-use super::strain::OsuStrainSkill;
+use super::strain::{DifficultyValue, OsuStrainSkill, UsedOsuStrainSkills};
 
 const SKILL_MULTIPLIER: f64 = 23.55;
 const STRAIN_DECAY_BASE: f64 = 0.15;
@@ -34,25 +34,24 @@ impl Relax {
     }
 
     pub fn get_curr_strain_peaks(self) -> StrainsVec {
-        self.inner.get_curr_strain_peaks()
+        self.inner.get_curr_strain_peaks().strains()
     }
 
-    pub fn difficulty_value(self) -> f64 {
+    pub fn difficulty_value(self) -> UsedOsuStrainSkills<DifficultyValue> {
         Self::static_difficulty_value(self.inner)
     }
 
     /// Use [`difficulty_value`] instead whenever possible because
     /// [`as_difficulty_value`] clones internally.
-    pub fn as_difficulty_value(&self) -> f64 {
+    pub fn as_difficulty_value(&self) -> UsedOsuStrainSkills<DifficultyValue> {
         Self::static_difficulty_value(self.inner.clone())
     }
 
-    fn static_difficulty_value(skill: OsuStrainSkill) -> f64 {
+    fn static_difficulty_value(skill: OsuStrainSkill) -> UsedOsuStrainSkills<DifficultyValue> {
         skill.difficulty_value(
             OsuStrainSkill::REDUCED_SECTION_COUNT,
             OsuStrainSkill::REDUCED_STRAIN_BASELINE,
             OsuStrainSkill::DECAY_WEIGHT,
-            OsuStrainSkill::DIFFICULTY_MULTIPLER,
         )
     }
 }

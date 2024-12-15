@@ -47,5 +47,5 @@ pub fn strains(difficulty: &Difficulty, map: &Beatmap) -> Result<OsuStrains, Con
         speed: speed.get_curr_strain_peaks().into_vec(),
         flashlight: flashlight.get_curr_strain_peaks().into_vec(),
         relax: relax.get_curr_strain_peaks().into_vec(),
-    }
+    })
 }
