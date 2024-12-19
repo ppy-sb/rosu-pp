@@ -828,8 +828,15 @@ impl OsuPerformanceInner<'_> {
 
         // * balance inflation of the performace value
         if self.mods.rx() {
-            aim_value *= 1.715;
-            acc_value *= 1.52;
+            if self.using_classic_slider_acc {
+                aim_value *= 1.715;
+                acc_value *= 1.52;
+            } else {
+                // * it is quite weird that we can't find any better values for lazer formula
+                // * maybe the core fitting formula has to be changed
+                aim_value *= 1.6;
+                acc_value *= 1.42;
+            }
         }
 
         let mut pp = (aim_value.powf(1.1)
