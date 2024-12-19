@@ -17,14 +17,14 @@ const TEST_CASES: [(&str, u32, u32, u32); 24] = [
     ("Chronostasis", 2874408, 200, 1950),       // HDDTRX
     ("quaver", 918723, 200, 1750),              // HDDTRX
     ("raise my sword", 1860169, 200, 1350),     // HDDTRX
-    ("Hardware Store", 1989203, 216, 1375),     // HDHRDTRX
     ("Songs Compilation", 1849580, 200, 1575),  // HDDTRX
+    ("Fallen Symphony", 4042579, 128, 1000),    // RX
+    ("Oshama Scramble!", 2844649, 128, 1500),   // RX
+    ("Hardware Store", 1989203, 216, 1375),     // HDHRDTRX
     ("Shinryu Monogatari", 2818772, 144, 1125), // HRRX
     ("THE PLATINUM", 4352925, 128, 1350),       // RX
     ("Charge-Parity", 4349848, 128, 1000),      // RX
-    ("Fallen Symphony", 4042579, 128, 1000),    // RX
     ("TERRAFORGE", 4439703, 128, 1150),         // RX
-    ("Oshama Scramble!", 2844649, 128, 1000),   // RX
 ];
 
 #[test]
@@ -59,6 +59,11 @@ fn calculate_batch() {
 fn get_weight() -> f64 {
     let map = Beatmap::from_path("./resources/2486881.osu").unwrap();
     let performance = rosu_pp::Performance::new(&map);
-    let pp_value = performance.accuracy(99.5).mods(200).calculate().pp();
+    let pp_value = performance
+        .accuracy(99.5)
+        .mods(200)
+        .lazer(false)
+        .calculate()
+        .pp();
     1000.0 / pp_value
 }

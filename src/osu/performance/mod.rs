@@ -828,8 +828,8 @@ impl OsuPerformanceInner<'_> {
 
         // * balance inflation of the performace value
         if self.mods.rx() {
-            aim_value *= 1.6;
-            acc_value *= 1.42;
+            aim_value *= 1.715;
+            acc_value *= 1.52;
         }
 
         let mut pp = (aim_value.powf(1.1)
@@ -874,7 +874,7 @@ impl OsuPerformanceInner<'_> {
                 self.effective_miss_count,
                 self.attrs.aim_difficult_strain_count,
                 total_hits,
-                self.mods.rx()
+                self.mods.rx(),
             );
         }
 
@@ -964,14 +964,13 @@ impl OsuPerformanceInner<'_> {
         aim_value *= 0.98 + self.attrs.od.powf(2.0) / 2500.0;
 
         if self.mods.rx() && self.mods.clock_rate() < 1.5 {
-            aim_value *= 1.2
+            aim_value *= 1.23
         }
 
         aim_value
     }
 
     fn compute_speed_value(&self) -> f64 {
-
         let mut speed_value = OsuStrainSkill::difficulty_to_performance(self.attrs.speed);
 
         let total_hits = self.total_hits();
@@ -987,7 +986,7 @@ impl OsuPerformanceInner<'_> {
                 self.effective_miss_count,
                 self.attrs.speed_difficult_strain_count,
                 total_hits,
-                self.mods.rx()
+                self.mods.rx(),
             );
         }
 
@@ -1127,9 +1126,15 @@ impl OsuPerformanceInner<'_> {
     // * Miss penalty assumes that a player will miss on the hardest parts of a map,
     // * so we use the amount of relatively difficult sections to adjust miss penalty
     // * to make it more punishing on maps with lower amount of hard sections.
-    fn calculate_miss_penalty(miss_count: f64, diff_strain_count: f64, total_hits: f64, with_rx: bool) -> f64 {
+    fn calculate_miss_penalty(
+        miss_count: f64,
+        diff_strain_count: f64,
+        total_hits: f64,
+        with_rx: bool,
+    ) -> f64 {
         if with_rx {
-            return 0.97 * (1.0 - (miss_count / total_hits).powf(0.5)).powf(1.0 + (miss_count / 1.5));
+            return 0.97
+                * (1.0 - (miss_count / total_hits).powf(0.5)).powf(1.0 + (miss_count / 1.5));
         }
         0.96 / ((miss_count / (4.0 * diff_strain_count.ln().powf(0.94))) + 1.0)
     }
