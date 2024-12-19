@@ -1,6 +1,6 @@
 use rosu_pp::Beatmap;
 
-const TEST_CASES: [(&str, u32, u32, u32); 23] = [
+const TEST_CASES: [(&str, u32, u32, u32); 24] = [
     ("Sunglow", 2486881, 200, 1000),            // HDDTRX
     ("Sidetracked Day", 1537566, 200, 1100),    // HDDTRX
     ("Team Magma", 2097898, 200, 870),          // HDDTRX
@@ -24,6 +24,7 @@ const TEST_CASES: [(&str, u32, u32, u32); 23] = [
     ("Charge-Parity", 4349848, 128, 1000),      // RX
     ("Fallen Symphony", 4042579, 128, 1000),    // RX
     ("TERRAFORGE", 4439703, 128, 1150),         // RX
+    ("Oshama Scramble!", 2844649, 128, 1000),   // RX
 ];
 
 #[test]
@@ -36,7 +37,12 @@ fn calculate_batch() {
     for (title, beatmap_id, mods, target_pp) in TEST_CASES {
         let map = Beatmap::from_path(format!("./resources/{}.osu", beatmap_id)).unwrap();
         let performance = rosu_pp::Performance::new(&map);
-        let pp_value = performance.accuracy(99.5).mods(mods).calculate().pp();
+        let pp_value = performance
+            .accuracy(99.5)
+            .mods(mods)
+            .lazer(false)
+            .calculate()
+            .pp();
         let pp_weighted = pp_value * weight;
         println!(
             "{0: <20} | {1: <10} | {2: <12} | {3: <12} | {4: <10} | {5: <10}",
