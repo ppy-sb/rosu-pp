@@ -220,6 +220,7 @@ impl OsuPerformanceCalculator<'_> {
             }
         }
 
+        // R* Tweak acc bonus for RX
         aim_value *= if self.mods.rx() {
             0.3 + self.acc / 2.0
         } else {
@@ -229,8 +230,8 @@ impl OsuPerformanceCalculator<'_> {
         aim_value *= 0.98 + f64::powf(f64::max(0.0, self.attrs.od()), 2.0) / 2500.0;
 
         // R* Bonus bonus normal clock rate scores
-        if self.mods.rx() && self.mods.clock_rate() > 1.0 {
-            aim_value *= 1.23
+        if self.mods.rx() && self.mods.clock_rate() <= 1.0 {
+            aim_value *= 1.20
         }
 
         aim_value
@@ -311,10 +312,6 @@ impl OsuPerformanceCalculator<'_> {
     }
 
     fn compute_accuracy_value(&self) -> f64 {
-        if self.mods.rx() {
-            return 0.0;
-        }
-
         // * This percentage only considers HitCircles of any value - in this part
         // * of the calculation we focus on hitting the timing hit window.
         let mut amount_hit_objects_with_acc = self.attrs.n_circles;
