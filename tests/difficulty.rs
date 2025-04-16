@@ -67,6 +67,7 @@ macro_rules! test_cases {
             ok_hit_window: $ok_hit_window,
             meh_hit_window: $meh_hit_window,
             hp: $hp,
+            cs: 0.0,
             n_circles: $n_circles,
             n_sliders: $n_sliders,
             n_large_ticks: $n_large_ticks,
@@ -508,6 +509,7 @@ impl AssertEq for OsuDifficultyAttributes {
             ok_hit_window,
             meh_hit_window,
             hp,
+            cs,
             n_circles,
             n_sliders,
             n_large_ticks,
@@ -538,6 +540,7 @@ impl AssertEq for OsuDifficultyAttributes {
         assert_eq_float(*ok_hit_window, expected.ok_hit_window);
         assert_eq_float(*meh_hit_window, expected.meh_hit_window);
         assert_eq_float(*hp, expected.hp);
+        assert_eq_float(*cs, 0.0);
         assert_eq!(*n_circles, expected.n_circles);
         assert_eq!(*n_sliders, expected.n_sliders);
         assert_eq!(*n_large_ticks, expected.n_large_ticks);

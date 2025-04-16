@@ -29,6 +29,8 @@ pub struct OsuDifficultyAttributes {
     pub meh_hit_window: f64,
     /// The health drain rate.
     pub hp: f64,
+    /// The circle size.
+    pub cs: f64,
     /// The amount of circles.
     pub n_circles: u32,
     /// The amount of sliders.

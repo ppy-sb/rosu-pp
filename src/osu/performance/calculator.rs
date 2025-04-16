@@ -226,6 +226,11 @@ impl OsuPerformanceCalculator<'_> {
             aim_value *= base_buff;
         }
 
+        // Precision buff (reading)
+        if self.attrs.cs > 5.58 && self.mods.rx() {
+            aim_value *= ((self.attrs.cs - 5.46).powf(1.8) + 1.0).powf(0.03);
+        }
+
         aim_value *= if self.mods.rx() {
             0.3 + self.acc / 2.0
         } else {
