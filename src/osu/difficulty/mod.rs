@@ -60,6 +60,7 @@ impl OsuDifficultySetup {
         let attrs = OsuDifficultyAttributes {
             ar: map_attrs.ar,
             hp: map_attrs.hp,
+            cs: map_attrs.cs,
             great_hit_window: map_attrs.hit_windows.od_great,
             ok_hit_window: map_attrs.hit_windows.od_ok.unwrap_or(0.0),
             meh_hit_window: map_attrs.hit_windows.od_meh.unwrap_or(0.0),

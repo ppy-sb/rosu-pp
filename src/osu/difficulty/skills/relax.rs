@@ -100,8 +100,8 @@ struct RelaxAimEvaluator;
 impl RelaxAimEvaluator {
     const WIDE_ANGLE_MULTIPLIER: f64 = 1.5;
     const ACUTE_ANGLE_MULTIPLIER: f64 = 2.6;
-    const SLIDER_MULTIPLIER: f64 = 1.35;
-    const VELOCITY_CHANGE_MULTIPLIER: f64 = 0.75;
+    const SLIDER_MULTIPLIER: f64 = 1.5;
+    const VELOCITY_CHANGE_MULTIPLIER: f64 = 1.2;
     const WIGGLE_MULTIPLIER: f64 = 1.02;
 
     #[allow(clippy::too_many_lines)]
@@ -161,6 +161,11 @@ impl RelaxAimEvaluator {
         // * Start strain with regular velocity.
         let mut aim_strain = curr_vel;
 
+        // R* Penalize overall stream aim.
+        // R* Fittings: [(100, 0.92), (300, 0.98)] linear function.
+        let stream_nerf = 0.0006 * osu_curr_obj.lazy_jump_dist + 0.86;
+        aim_strain *= stream_nerf.clamp(0.92, 0.98);
+
         // * If rhythms are the same.
         if osu_curr_obj.strain_time.max(osu_last_obj.strain_time)
             < 1.25 * osu_curr_obj.strain_time.min(osu_last_obj.strain_time)
@@ -202,6 +207,12 @@ impl RelaxAimEvaluator {
                         f64::from(DIAMETER),
                         f64::from(DIAMETER * 2),
                     );
+
+                // R* Penalize wide angles if their distances are quite small (consider as wide angle stream).
+                // R* Only jump dist is considered here, not velocity.
+                // R* Fittings: [(200, 0), (250, 0.5), (300, 1), (350, 1)] linear function.
+                let wide_stream_nerf = osu_curr_obj.lazy_jump_dist * 0.007 - 1.3;
+                wide_angle_bonus *= wide_stream_nerf.clamp(0.0, 1.0);
 
                 // * Apply wiggle bonus for jumps that are [radius, 3*diameter] in distance, with < 110 angle
                 // * https://www.desmos.com/calculator/dp0v0nvowc
