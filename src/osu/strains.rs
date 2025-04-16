@@ -11,6 +11,8 @@ use super::difficulty::{skills::OsuSkills, DifficultyValues};
 pub struct OsuStrains {
     /// Strain peaks of the aim skill.
     pub aim: Vec<f64>,
+    /// Strain peaks of the relax skill.
+    pub relax: Vec<f64>,
     /// Strain peaks of the aim skill without sliders.
     pub aim_no_sliders: Vec<f64>,
     /// Strain peaks of the speed skill.
@@ -31,6 +33,7 @@ pub fn strains(difficulty: &Difficulty, map: &Beatmap) -> Result<OsuStrains, Con
         skills:
             OsuSkills {
                 aim,
+                relax,
                 aim_no_sliders,
                 speed,
                 flashlight,
@@ -40,6 +43,7 @@ pub fn strains(difficulty: &Difficulty, map: &Beatmap) -> Result<OsuStrains, Con
 
     Ok(OsuStrains {
         aim: aim.into_current_strain_peaks().into_vec(),
+        relax: relax.into_current_strain_peaks().into_vec(),
         aim_no_sliders: aim_no_sliders.into_current_strain_peaks().into_vec(),
         speed: speed.into_current_strain_peaks().into_vec(),
         flashlight: flashlight.into_current_strain_peaks().into_vec(),
