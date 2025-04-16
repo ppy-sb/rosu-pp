@@ -170,7 +170,8 @@ impl OsuPerformanceCalculator<'_> {
 
         let total_hits = self.total_hits();
 
-        let len_bonus = 0.95
+        let len_bonus_basis = if self.mods.rx() { 0.88 } else { 0.95 };
+        let len_bonus = len_bonus_basis
             + 0.4 * (total_hits / 2000.0).min(1.0)
             + f64::from(u8::from(total_hits > 2000.0)) * (total_hits / 2000.0).log10() * 0.5;
 
@@ -180,15 +181,17 @@ impl OsuPerformanceCalculator<'_> {
             aim_value *= Self::calculate_miss_penalty(
                 self.effective_miss_count,
                 self.attrs.aim_difficult_strain_count,
+                total_hits,
+                self.mods,
             );
         }
 
-        let ar_factor = if self.mods.rx() {
-            0.0
-        } else if self.attrs.ar > 10.33 {
+        let lowar_factor_basis = if self.mods.rx() { 0.025 } else { 0.05 };
+
+        let ar_factor = if self.attrs.ar > 10.33 {
             0.3 * (self.attrs.ar - 10.33)
         } else if self.attrs.ar < 8.0 {
-            0.05 * (8.0 - self.attrs.ar)
+            lowar_factor_basis * (8.0 - self.attrs.ar)
         } else {
             0.0
         };
@@ -204,10 +207,30 @@ impl OsuPerformanceCalculator<'_> {
                     * (1.0 - 0.003 * self.attrs.hp * self.attrs.hp);
         } else if self.mods.hd() || self.mods.tc() {
             // * We want to give more reward for lower AR when it comes to aim and HD. This nerfs high AR and buffs lower AR.
-            aim_value *= 1.0 + 0.04 * (12.0 - self.attrs.ar);
+            let hd_factor = if self.mods.rx() {
+                1.0 + 0.05 * (11.0 - self.attrs.ar)
+            } else {
+                1.0 + 0.04 * (12.0 - self.attrs.ar)
+            };
+            aim_value *= hd_factor;
         }
 
-        aim_value *= self.acc;
+        // * EZ bonus
+        if self.mods.ez() && self.mods.rx() {
+            let mut base_buff = 1.08_f64;
+
+            if self.attrs.ar <= 8.0 {
+                base_buff += (7.0 - self.attrs.ar) / 100.0;
+            }
+
+            aim_value *= base_buff;
+        }
+
+        aim_value *= if self.mods.rx() {
+            0.3 + self.acc / 2.0
+        } else {
+            self.acc
+        };
         // * It is important to consider accuracy difficulty when scaling with accuracy.
         aim_value *= 0.98 + f64::powf(f64::max(0.0, self.attrs.od()), 2.0) / 2500.0;
 
@@ -233,6 +256,8 @@ impl OsuPerformanceCalculator<'_> {
             speed_value *= Self::calculate_miss_penalty(
                 self.effective_miss_count,
                 self.attrs.speed_difficult_strain_count,
+                total_hits,
+                self.mods,
             );
         }
 
@@ -507,7 +532,16 @@ impl OsuPerformanceCalculator<'_> {
     // * Miss penalty assumes that a player will miss on the hardest parts of a map,
     // * so we use the amount of relatively difficult sections to adjust miss penalty
     // * to make it more punishing on maps with lower amount of hard sections.
-    fn calculate_miss_penalty(miss_count: f64, diff_strain_count: f64) -> f64 {
+    fn calculate_miss_penalty(
+        miss_count: f64,
+        diff_strain_count: f64,
+        total_hits: f64,
+        mods: &GameMods,
+    ) -> f64 {
+        if mods.rx() {
+            return 0.97
+                * (1.0 - (miss_count / total_hits).powf(0.5)).powf(1.0 + (miss_count / 1.5));
+        }
         0.96 / ((miss_count / (4.0 * diff_strain_count.ln().powf(0.94))) + 1.0)
     }
 
