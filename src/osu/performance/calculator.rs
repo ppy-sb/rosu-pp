@@ -50,7 +50,7 @@ impl<'a> OsuPerformanceCalculator<'a> {
 }
 
 impl OsuPerformanceCalculator<'_> {
-    pub fn calculate(mut self) -> OsuPerformanceAttributes {
+    pub fn calculate(self) -> OsuPerformanceAttributes {
         let total_hits = self.state.total_hits();
 
         if total_hits == 0 {
@@ -72,35 +72,18 @@ impl OsuPerformanceCalculator<'_> {
             multiplier *= 1.0 - (f64::from(self.attrs.n_spinners) / total_hits).powf(0.85);
         }
 
-        if self.mods.rx() {
-            let od = self.attrs.od();
-
-            // * https://www.desmos.com/calculator/bc9eybdthb
-            // * we use OD13.3 as maximum since it's the value at which great hitwidow becomes 0
-            // * this is well beyond currently maximum achievable OD which is 12.17 (DTx2 + DA with OD11)
-            let (n100_mult, n50_mult) = if od > 0.0 {
-                (
-                    (1.0 - (od / 13.33).powf(1.8)).max(0.0),
-                    (1.0 - (od / 13.33).powf(5.0)).max(0.0),
-                )
-            } else {
-                (1.0, 1.0)
-            };
-
-            // * As we're adding Oks and Mehs to an approximated number of combo breaks the result can be
-            // * higher than total hits in specific scenarios (which breaks some calculations) so we need to clamp it.
-            self.effective_miss_count = (self.effective_miss_count
-                + f64::from(self.state.n100) * n100_mult
-                + f64::from(self.state.n50) * n50_mult)
-                .min(total_hits);
-        }
-
         let speed_deviation = self.calculate_speed_deviation();
 
-        let aim_value = self.compute_aim_value();
+        let mut aim_value = self.compute_aim_value();
         let speed_value = self.compute_speed_value(speed_deviation);
-        let acc_value = self.compute_accuracy_value();
+        let mut acc_value = self.compute_accuracy_value();
         let flashlight_value = self.compute_flashlight_value();
+
+        // R* Balance inflation of the performace value
+        if self.mods.rx() {
+            aim_value *= 1.715;
+            acc_value *= 1.52;
+        }
 
         let pp = (aim_value.powf(1.1)
             + speed_value.powf(1.1)
@@ -186,6 +169,7 @@ impl OsuPerformanceCalculator<'_> {
             );
         }
 
+        // R* Low AR Override from Akatsuki
         let lowar_factor_basis = if self.mods.rx() { 0.025 } else { 0.05 };
 
         let ar_factor = if self.attrs.ar > 10.33 {
@@ -206,7 +190,7 @@ impl OsuPerformanceCalculator<'_> {
                     * self.acc.powf(16.0))
                     * (1.0 - 0.003 * self.attrs.hp * self.attrs.hp);
         } else if self.mods.hd() || self.mods.tc() {
-            // * We want to give more reward for lower AR when it comes to aim and HD. This nerfs high AR and buffs lower AR.
+            // R* We want to give more reward for lower AR when it comes to aim and HD. This nerfs high AR and buffs lower AR.
             let hd_factor = if self.mods.rx() {
                 1.0 + 0.05 * (11.0 - self.attrs.ar)
             } else {
@@ -215,7 +199,7 @@ impl OsuPerformanceCalculator<'_> {
             aim_value *= hd_factor;
         }
 
-        // * EZ bonus
+        // R* EZ bonus
         if self.mods.ez() && self.mods.rx() {
             let mut base_buff = 1.08_f64;
 
@@ -226,9 +210,14 @@ impl OsuPerformanceCalculator<'_> {
             aim_value *= base_buff;
         }
 
-        // Precision buff (reading)
+        // R* Precision buff (reading)
         if self.attrs.cs > 5.58 && self.mods.rx() {
             aim_value *= ((self.attrs.cs - 5.46).powf(1.8) + 1.0).powf(0.03);
+            // R* Special buff for high CS and high AR
+            if self.attrs.ar > 10.8 {
+                aim_value *= 1.0 + (self.attrs.ar - 10.8);
+                aim_value *= 1.0 + (self.attrs.cs - 6.0).clamp(0.0, 0.2);
+            }
         }
 
         aim_value *= if self.mods.rx() {
@@ -238,6 +227,11 @@ impl OsuPerformanceCalculator<'_> {
         };
         // * It is important to consider accuracy difficulty when scaling with accuracy.
         aim_value *= 0.98 + f64::powf(f64::max(0.0, self.attrs.od()), 2.0) / 2500.0;
+
+        // R* Bonus bonus normal clock rate scores
+        if self.mods.rx() && self.mods.clock_rate() > 1.0 {
+            aim_value *= 1.23
+        }
 
         aim_value
     }
