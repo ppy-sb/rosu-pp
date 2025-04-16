@@ -27,7 +27,7 @@ define_skill! {
 }
 
 impl Relax {
-    const SKILL_MULTIPLIER: f64 = 25.6;
+    const SKILL_MULTIPLIER: f64 = 24.16;
     const STRAIN_DECAY_BASE: f64 = 0.15;
 
     fn calculate_initial_strain(
@@ -191,17 +191,19 @@ impl RelaxAimEvaluator {
                                 f64::powf(Self::calc_acute_angle_bonus(last_angle), 3.0),
                             ));
 
+                let nerf_strain_time = if osu_curr_obj.strain_time < 100.0 {
+                    osu_curr_obj.strain_time * 1.2
+                } else {
+                    osu_curr_obj.strain_time
+                };
+
                 // * Apply full wide angle bonus for distance more than one diameter
                 wide_angle_bonus *= angle_bonus
                     * smootherstep(osu_curr_obj.lazy_jump_dist, 0.0, f64::from(DIAMETER));
 
                 // * Apply acute angle bonus for BPM above 300 1/2 and distance more than one diameter
                 acute_angle_bonus *= angle_bonus
-                    * smootherstep(
-                        milliseconds_to_bpm(osu_curr_obj.strain_time, Some(2)),
-                        300.0,
-                        400.0,
-                    )
+                    * smootherstep(milliseconds_to_bpm(nerf_strain_time, Some(2)), 300.0, 400.0)
                     * smootherstep(
                         osu_curr_obj.lazy_jump_dist,
                         f64::from(DIAMETER),
