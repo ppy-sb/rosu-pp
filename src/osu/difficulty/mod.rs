@@ -124,17 +124,26 @@ impl DifficultyValues {
     pub fn eval(attrs: &mut OsuDifficultyAttributes, mods: &GameMods, skills: &OsuSkills) {
         let OsuSkills {
             aim,
+            relax,
             aim_no_sliders,
             speed,
             flashlight,
         } = skills;
 
-        let aim_difficulty_value = aim.cloned_difficulty_value();
+        let mut aim_difficulty_value = aim.cloned_difficulty_value();
+
+        if mods.rx() {
+            aim_difficulty_value = relax.cloned_difficulty_value();
+        }
 
         let mut aim_rating = aim_difficulty_value.sqrt() * DIFFICULTY_MULTIPLIER;
         let aim_difficult_strain_count = aim.count_top_weighted_strains(aim_difficulty_value);
 
-        let difficult_sliders = aim.get_difficult_sliders();
+        let mut difficult_sliders = aim.get_difficult_sliders();
+
+        if mods.rx() {
+            difficult_sliders = relax.get_difficult_sliders();
+        }
 
         let aim_rating_no_sliders =
             f64::sqrt(aim_no_sliders.cloned_difficulty_value()) * DIFFICULTY_MULTIPLIER;
@@ -158,9 +167,7 @@ impl DifficultyValues {
         }
 
         if mods.rx() {
-            aim_rating *= 0.9;
             speed_rating = 0.0;
-            flashlight_rating *= 0.7;
         } else if mods.ap() {
             speed_rating *= 0.5;
             aim_rating = 0.0;
