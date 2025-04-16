@@ -4,7 +4,7 @@ use crate::{
     osu::object::OsuObject,
 };
 
-use self::{aim::Aim, flashlight::Flashlight, speed::Speed};
+use self::{aim::Aim, flashlight::Flashlight, relax::Relax, speed::Speed};
 
 use super::{
     object::OsuDifficultyObject, scaling_factor::ScalingFactor, HD_FADE_IN_DURATION_MULTIPLIER,
@@ -12,11 +12,13 @@ use super::{
 
 pub mod aim;
 pub mod flashlight;
+pub mod relax;
 pub mod speed;
 pub mod strain;
 
 pub struct OsuSkills {
     pub aim: Aim,
+    pub relax: Relax,
     pub aim_no_sliders: Aim,
     pub speed: Speed,
     pub flashlight: Flashlight,
@@ -46,12 +48,14 @@ impl OsuSkills {
         };
 
         let aim = Aim::new(true);
+        let relax = Relax::new(true);
         let aim_no_sliders = Aim::new(false);
         let speed = Speed::new(hit_window, mods.ap());
         let flashlight = Flashlight::new(mods, scaling_factor.radius, time_preempt, time_fade_in);
 
         Self {
             aim,
+            relax,
             aim_no_sliders,
             speed,
             flashlight,
@@ -60,6 +64,7 @@ impl OsuSkills {
 
     pub fn process(&mut self, curr: &OsuDifficultyObject<'_>, objects: &[OsuDifficultyObject<'_>]) {
         self.aim.process(curr, objects);
+        self.relax.process(curr, objects);
         self.aim_no_sliders.process(curr, objects);
         self.speed.process(curr, objects);
         self.flashlight.process(curr, objects);
