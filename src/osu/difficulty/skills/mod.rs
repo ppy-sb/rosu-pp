@@ -48,7 +48,7 @@ impl OsuSkills {
         };
 
         let aim = Aim::new(true);
-        let relax = Relax::new(true);
+        let relax = Relax::new(true, hit_window);
         let aim_no_sliders = Aim::new(false);
         let speed = Speed::new(hit_window, mods.ap());
         let flashlight = Flashlight::new(mods, scaling_factor.radius, time_preempt, time_fade_in);
