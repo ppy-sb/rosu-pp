@@ -191,11 +191,14 @@ impl RelaxAimEvaluator {
                                 f64::powf(Self::calc_acute_angle_bonus(last_angle), 3.0),
                             ));
 
-                let nerf_strain_time = if osu_curr_obj.strain_time < 100.0 {
-                    osu_curr_obj.strain_time * 1.2
-                } else {
-                    osu_curr_obj.strain_time
-                };
+                // R* Nerf strain time for above 300 1/2 fast objects smoothly.
+                let nerf_base = 1.07_f64;
+                let nerf_strain_time = osu_curr_obj.strain_time
+                    * nerf_base.powf(smootherstep(
+                        milliseconds_to_bpm(osu_curr_obj.strain_time, Some(2)),
+                        300.0,
+                        400.0,
+                    ));
 
                 // * Apply full wide angle bonus for distance more than one diameter
                 wide_angle_bonus *= angle_bonus
