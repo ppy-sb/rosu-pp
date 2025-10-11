@@ -133,18 +133,10 @@ impl DifficultyValues {
 
         let mut aim_difficulty_value = aim.cloned_difficulty_value();
 
-        if mods.rx() {
-            aim_difficulty_value = relax.cloned_difficulty_value();
-        }
-
         let mut aim_rating = aim_difficulty_value.sqrt() * DIFFICULTY_MULTIPLIER;
-        let aim_difficult_strain_count = aim.count_top_weighted_strains(aim_difficulty_value);
+        let mut aim_difficult_strain_count = aim.count_top_weighted_strains(aim_difficulty_value);
 
         let mut difficult_sliders = aim.get_difficult_sliders();
-
-        if mods.rx() {
-            difficult_sliders = relax.get_difficult_sliders();
-        }
 
         let aim_rating_no_sliders =
             f64::sqrt(aim_no_sliders.cloned_difficulty_value()) * DIFFICULTY_MULTIPLIER;
@@ -154,6 +146,14 @@ impl DifficultyValues {
         } else {
             1.0
         };
+
+        if mods.rx() {
+            aim_difficulty_value = relax.cloned_difficulty_value();
+            aim_rating = f64::sqrt(aim_difficulty_value) * DIFFICULTY_MULTIPLIER;
+            aim_difficult_strain_count = relax.count_top_weighted_strains(aim_difficulty_value);
+
+            difficult_sliders = relax.get_difficult_sliders();
+        }
 
         let speed_difficulty_value = speed.cloned_difficulty_value();
         let mut speed_rating = f64::sqrt(speed_difficulty_value) * DIFFICULTY_MULTIPLIER;
