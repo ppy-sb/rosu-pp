@@ -170,9 +170,7 @@ impl DifficultyValues {
         if mods.rx() {
             speed_rating = 0.0;
         } else if mods.ap() {
-            speed_rating *= 0.5;
             aim_rating = 0.0;
-            flashlight_rating *= 0.4;
         }
 
         let base_aim_performance = Aim::difficulty_to_performance(aim_rating);

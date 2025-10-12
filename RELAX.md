@@ -22,4 +22,4 @@ hit_window: overall_difficulty, representing the hit range that players should f
 1. Nerf velocity bonus in acute angle bonus.
 1. Adjust multipliers to bonus VELOCITY_CHANGE and SLIDER.
 1. Bonus scores that doesn't enable DT.
-1. Inflat the final performance value.
+1. Inflate the final performance value.
