@@ -18,7 +18,7 @@ use super::{OsuRelaxPerformanceAttributes, OsuRelaxScoreState};
 ///
 /// ```
 /// use rosu_pp::{Beatmap, Difficulty};
-/// use rosu_pp::osu::{Osu, OsuRelaxGradualPerformance, OsuRelaxScoreState};
+/// use rosu_pp::osurelax::{OsuRelaxGradualPerformance, OsuRelaxScoreState};
 ///
 /// let map = Beatmap::from_path("./resources/2785319.osu").unwrap();
 ///

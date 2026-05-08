@@ -1,6 +1,4 @@
-use std::{borrow::Cow, cmp};
-
-use rosu_map::section::general::GameMode;
+use std::cmp;
 
 use self::calculator::OsuRelaxPerformanceCalculator;
 pub use self::calculator::PERFORMANCE_BASE_MULTIPLIER;
@@ -9,13 +7,12 @@ use crate::{
     any::{Difficulty, HitResultPriority, IntoModePerformance},
     model::{mode::ConvertError, mods::GameMods},
     util::map_or_attrs::MapOrAttrs,
-    Beatmap,
 };
 
 use super::{
+    OsuRelax,
     attributes::{OsuRelaxDifficultyAttributes, OsuRelaxPerformanceAttributes},
     score_state::{OsuRelaxScoreOrigin, OsuRelaxScoreState},
-    OsuRelax,
 };
 
 mod calculator;
@@ -393,135 +390,105 @@ impl<'map> OsuRelaxPerformance<'map> {
                 (Some(_), None, Some(_)) => n100 = n_objects.saturating_sub(n300 + n50 + misses),
                 (None, Some(_), Some(_)) => n300 = n_objects.saturating_sub(n100 + n50 + misses),
                 (Some(_), None, None) => {
-                    if let HitResultPriority::BestCase = priority {
-                        n100 = cmp::min(
-                            (f64::round(target_total) as u32)
-                                .saturating_sub(50 * n_remaining + 250 * n300 + slider_acc_value)
-                                / 50,
-                            n_remaining - n300,
-                        );
-                        n50 = n_objects.saturating_sub(n300 + n100 + misses);
-                    } else {
-                        let mut best_dist = f64::MAX;
+                    let mut best_dist = f64::MAX;
 
-                        n300 = cmp::min(n300, n_remaining);
-                        let n_remaining = n_remaining - n300;
+                    n300 = cmp::min(n300, n_remaining);
+                    let n_remaining = n_remaining - n300;
 
-                        let raw_n100 = (target_total
-                            - f64::from(50 * n_remaining + 300 * n300 + slider_acc_value))
-                            / 50.0;
-                        let min_n100 = cmp::min(n_remaining, raw_n100.floor() as u32);
-                        let max_n100 = cmp::min(n_remaining, raw_n100.ceil() as u32);
+                    let raw_n100 = (target_total
+                        - f64::from(50 * n_remaining + 300 * n300 + slider_acc_value))
+                        / 50.0;
+                    let min_n100 = cmp::min(n_remaining, raw_n100.floor().max(0.0) as u32);
+                    let max_n100 = cmp::min(n_remaining, raw_n100.ceil().max(0.0) as u32);
 
-                        for new100 in min_n100..=max_n100 {
-                            let new50 = n_remaining - new100;
+                    for new100 in min_n100..=max_n100 {
+                        let new50 = n_remaining - new100;
 
-                            let state = NoComboState {
-                                n300,
-                                n100: new100,
-                                n50: new50,
-                                misses,
-                                large_tick_hits,
-                                small_tick_hits,
-                                slider_end_hits,
-                            };
+                        let state = NoComboState {
+                            n300,
+                            n100: new100,
+                            n50: new50,
+                            misses,
+                            large_tick_hits,
+                            small_tick_hits,
+                            slider_end_hits,
+                        };
 
-                            let dist = (acc - state.accuracy(origin)).abs();
+                        let dist = (acc - state.accuracy(origin)).abs();
 
-                            if dist < best_dist {
-                                best_dist = dist;
-                                n100 = new100;
-                                n50 = new50;
-                            }
+                        if dist < best_dist {
+                            best_dist = dist;
+                            n100 = new100;
+                            n50 = new50;
                         }
                     }
                 }
                 (None, Some(_), None) => {
-                    if let HitResultPriority::BestCase = priority {
-                        n300 = cmp::min(
-                            (f64::round(target_total) as u32)
-                                .saturating_sub(50 * n_remaining + 50 * n100 + slider_acc_value)
-                                / 250,
-                            n_remaining - n100,
-                        );
-                        n50 = n_objects.saturating_sub(n300 + n100 + misses);
-                    } else {
-                        let mut best_dist = f64::MAX;
+                    let mut best_dist = f64::MAX;
 
-                        n100 = cmp::min(n100, n_remaining);
-                        let n_remaining = n_remaining - n100;
+                    n100 = cmp::min(n100, n_remaining);
+                    let n_remaining = n_remaining - n100;
 
-                        let raw_n300 = (target_total
-                            - f64::from(50 * n_remaining + 100 * n100 + slider_acc_value))
-                            / 250.0;
-                        let min_n300 = cmp::min(n_remaining, raw_n300.floor() as u32);
-                        let max_n300 = cmp::min(n_remaining, raw_n300.ceil() as u32);
+                    let raw_n300 = (target_total
+                        - f64::from(50 * n_remaining + 100 * n100 + slider_acc_value))
+                        / 250.0;
+                    let min_n300 = cmp::min(n_remaining, raw_n300.floor().max(0.0) as u32);
+                    let max_n300 = cmp::min(n_remaining, raw_n300.ceil().max(0.0) as u32);
 
-                        for new300 in min_n300..=max_n300 {
-                            let new50 = n_remaining - new300;
+                    for new300 in min_n300..=max_n300 {
+                        let new50 = n_remaining - new300;
 
-                            let state = NoComboState {
-                                n300: new300,
-                                n100,
-                                n50: new50,
-                                misses,
-                                large_tick_hits,
-                                small_tick_hits,
-                                slider_end_hits,
-                            };
+                        let state = NoComboState {
+                            n300: new300,
+                            n100,
+                            n50: new50,
+                            misses,
+                            large_tick_hits,
+                            small_tick_hits,
+                            slider_end_hits,
+                        };
 
-                            let curr_dist = (acc - state.accuracy(origin)).abs();
+                        let curr_dist = (acc - state.accuracy(origin)).abs();
 
-                            if curr_dist < best_dist {
-                                best_dist = curr_dist;
-                                n300 = new300;
-                                n50 = new50;
-                            }
+                        if curr_dist < best_dist {
+                            best_dist = curr_dist;
+                            n300 = new300;
+                            n50 = new50;
                         }
                     }
                 }
                 (None, None, Some(_)) => {
-                    if let HitResultPriority::BestCase = priority {
-                        n300 = cmp::min(
-                            (f64::round(target_total) as u32 + 50 * n50)
-                                .saturating_sub(100 * n_remaining + slider_acc_value)
-                                / 200,
-                            n_remaining - n50,
-                        );
-                        n100 = n_objects.saturating_sub(n300 + n50 + misses);
-                    } else {
-                        let mut best_dist = f64::MAX;
+                    let mut best_dist = f64::MAX;
 
-                        n50 = cmp::min(n50, n_remaining);
-                        let n_remaining = n_remaining - n50;
+                    n50 = cmp::min(n50, n_remaining);
+                    let n_remaining_after_50 = n_remaining - n50;
 
-                        let raw_n300 = (target_total + f64::from(100 * misses + 50 * n50)
-                            - f64::from(100 * n_objects + slider_acc_value))
-                            / 200.0;
+                    let raw_n300 = (target_total + f64::from(100 * misses + 50 * n50)
+                        - f64::from(100 * n_objects + slider_acc_value))
+                        / 200.0;
 
-                        let min_n300 = cmp::min(n_remaining, raw_n300.floor() as u32);
-                        let max_n300 = cmp::min(n_remaining, raw_n300.ceil() as u32);
+                    let min_n300 = cmp::min(n_remaining_after_50, raw_n300.floor().max(0.0) as u32);
+                    let max_n300 = cmp::min(n_remaining_after_50, raw_n300.ceil().max(0.0) as u32);
 
-                        for new300 in min_n300..=max_n300 {
-                            let new100 = n_remaining - new300;
+                    for new300 in min_n300..=max_n300 {
+                        let new100 = n_remaining_after_50 - new300;
 
-                            let state = NoComboState {
-                                n300: new300,
-                                n100: new100,
-                                n50,
-                                misses,
-                                large_tick_hits,
-                                small_tick_hits,
-                                slider_end_hits,
-                            };
+                        let state = NoComboState {
+                            n300: new300,
+                            n100: new100,
+                            n50,
+                            misses,
+                            large_tick_hits,
+                            small_tick_hits,
+                            slider_end_hits,
+                        };
 
-                            let curr_dist = (acc - state.accuracy(origin)).abs();
+                        let curr_dist = (acc - state.accuracy(origin)).abs();
 
-                            if curr_dist < best_dist {
-                                best_dist = curr_dist;
-                                n300 = new300;
-                                n100 = new100;
-                            }
+                        if curr_dist < best_dist {
+                            best_dist = curr_dist;
+                            n300 = new300;
+                            n100 = new100;
                         }
                     }
                 }
@@ -586,14 +553,12 @@ impl<'map> OsuRelaxPerformance<'map> {
             let remaining = n_objects.saturating_sub(n300 + n100 + n50 + misses);
 
             match priority {
-                HitResultPriority::BestCase => {
-                    match (self.n300, self.n100, self.n50) {
-                        (None, ..) => n300 = remaining,
-                        (_, None, _) => n100 = remaining,
-                        (.., None) => n50 = remaining,
-                        _ => n300 += remaining,
-                    }
-                }
+                HitResultPriority::BestCase => match (self.n300, self.n100, self.n50) {
+                    (None, ..) => n300 = remaining,
+                    (_, None, _) => n100 = remaining,
+                    (.., None) => n50 = remaining,
+                    _ => n300 += remaining,
+                },
                 HitResultPriority::WorstCase => match (self.n50, self.n100, self.n300) {
                     (None, ..) => n50 = remaining,
                     (_, None, _) => n100 = remaining,
@@ -717,31 +682,6 @@ impl<'map> OsuRelaxPerformance<'map> {
             hitresult_priority: HitResultPriority::DEFAULT,
         }
     }
-
-    #[allow(clippy::result_large_err)]
-    pub(crate) fn try_convert_map(
-        map_or_attrs: MapOrAttrs<'map, OsuRelax>,
-        mode: GameMode,
-        mods: &GameMods,
-    ) -> Result<Cow<'map, Beatmap>, MapOrAttrs<'map, OsuRelax>> {
-        let MapOrAttrs::Map(map) = map_or_attrs else {
-            return Err(map_or_attrs);
-        };
-
-        match map {
-            Cow::Borrowed(map) => match map.convert_ref(mode, mods) {
-                Ok(map) => Ok(map),
-                Err(_) => Err(MapOrAttrs::Map(Cow::Borrowed(map))),
-            },
-            Cow::Owned(mut map) => {
-                if map.convert_mut(mode, mods).is_err() {
-                    return Err(MapOrAttrs::Map(Cow::Owned(map)));
-                }
-
-                Ok(Cow::Owned(map))
-            }
-        }
-    }
 }
 
 impl<'map, T: IntoModePerformance<'map, OsuRelax>> From<T> for OsuRelaxPerformance<'map> {
@@ -770,8 +710,7 @@ pub(crate) fn calculate_with_state(
                 f64::from(attrs.max_combo) - 0.1 * f64::from(attrs.n_sliders);
 
             if f64::from(state.max_combo) < full_combo_threshold {
-                effective_miss_count =
-                    full_combo_threshold / f64::from(state.max_combo).max(1.0);
+                effective_miss_count = full_combo_threshold / f64::from(state.max_combo).max(1.0);
             }
 
             effective_miss_count = effective_miss_count.min(total_imperfect_hits(&state));
@@ -780,8 +719,7 @@ pub(crate) fn calculate_with_state(
                 f64::from(attrs.max_combo - n_slider_ends_dropped(&attrs, &state));
 
             if f64::from(state.max_combo) < full_combo_threshold {
-                effective_miss_count =
-                    full_combo_threshold / f64::from(state.max_combo).max(1.0);
+                effective_miss_count = full_combo_threshold / f64::from(state.max_combo).max(1.0);
             }
 
             effective_miss_count = effective_miss_count
@@ -817,11 +755,17 @@ pub(crate) fn calculate_with_state(
     .calculate()
 }
 
-const fn n_slider_ends_dropped(attrs: &OsuRelaxDifficultyAttributes, state: &OsuRelaxScoreState) -> u32 {
+const fn n_slider_ends_dropped(
+    attrs: &OsuRelaxDifficultyAttributes,
+    state: &OsuRelaxScoreState,
+) -> u32 {
     attrs.n_sliders - state.slider_end_hits
 }
 
-const fn n_large_tick_miss(attrs: &OsuRelaxDifficultyAttributes, state: &OsuRelaxScoreState) -> u32 {
+const fn n_large_tick_miss(
+    attrs: &OsuRelaxDifficultyAttributes,
+    state: &OsuRelaxScoreState,
+) -> u32 {
     attrs.n_large_ticks - state.large_tick_hits
 }
 
@@ -877,6 +821,7 @@ mod test {
     use std::sync::OnceLock;
 
     use proptest::prelude::*;
+    use rosu_map::section::general::GameMode;
     use rosu_mods::{GameModIntermode, GameModsIntermode};
 
     use crate::Beatmap;
@@ -897,7 +842,9 @@ mod test {
         ATTRS
             .get_or_init(|| {
                 let map = beatmap();
-                let attrs = Difficulty::new().calculate_for_mode::<OsuRelax>(&map).unwrap();
+                let attrs = Difficulty::new()
+                    .calculate_for_mode::<OsuRelax>(&map)
+                    .unwrap();
 
                 assert_eq!(
                     (attrs.n_circles, attrs.n_sliders, attrs.n_spinners),

@@ -33,7 +33,7 @@ use super::{
 ///
 /// ```
 /// use rosu_pp::{Beatmap, Difficulty};
-/// use rosu_pp::osu::{Osu, OsuRelaxGradualDifficulty};
+/// use rosu_pp::osurelax::OsuRelaxGradualDifficulty;
 ///
 /// let map = Beatmap::from_path("./resources/2785319.osu").unwrap();
 ///

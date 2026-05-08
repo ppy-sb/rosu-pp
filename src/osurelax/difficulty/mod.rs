@@ -73,7 +73,7 @@ impl OsuRelaxDifficultySetup {
         let scaling_factor = ScalingFactor::new(map_attrs.cs().into());
 
         let attrs = OsuRelaxDifficultyAttributes {
-            ar: map_attrs.ar().into(),
+            ar: map_attrs.apply_clock_rate().ar,
             hp: f64::from(map_attrs.hp()),
             great_hit_window: hit_windows.od_great.unwrap_or(0.0),
             ok_hit_window: hit_windows.od_ok.unwrap_or(0.0),
