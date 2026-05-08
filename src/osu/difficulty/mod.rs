@@ -43,6 +43,10 @@ pub fn difficulty(
     difficulty: &Difficulty,
     map: &Beatmap,
 ) -> Result<OsuDifficultyAttributes, ConvertError> {
+    if difficulty.get_mods().rx() {
+        let relax_attrs = crate::osurelax::difficulty::difficulty(difficulty, map)?;
+        return Ok(relax_attrs.into());
+    }
     let map = prepare_map(difficulty, map)?;
 
     Ok(calculate_difficulty(difficulty, &map))
@@ -52,6 +56,10 @@ pub fn checked_difficulty(
     difficulty: &Difficulty,
     map: &Beatmap,
 ) -> Result<OsuDifficultyAttributes, CalculateError> {
+    if difficulty.get_mods().rx() {
+        let relax_attrs = crate::osurelax::difficulty::checked_difficulty(difficulty, map)?;
+        return Ok(relax_attrs.into());
+    }
     let map = prepare_map(difficulty, map)?;
     map.check_suspicion()?;
 

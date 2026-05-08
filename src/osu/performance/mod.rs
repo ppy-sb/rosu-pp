@@ -623,6 +623,16 @@ unsafe fn calculate(perf: OsuPerformance<'_>, state: OsuScoreState) -> OsuPerfor
     let attrs = unsafe { perf.map_or_attrs.into_attrs() };
 
     let mods = perf.difficulty.get_mods();
+
+    if mods.rx() {
+        let relax_attrs: crate::osurelax::OsuRelaxDifficultyAttributes = attrs.into();
+        let relax_state: crate::osurelax::OsuRelaxScoreState = state.into();
+        let lazer = perf.difficulty.get_lazer();
+        let relax_result =
+            crate::osurelax::performance::calculate_with_state(relax_attrs, relax_state, mods, lazer);
+        return relax_result.into();
+    }
+
     let lazer = perf.difficulty.get_lazer();
     let using_classic_slider_acc = mods.no_slider_head_acc(lazer);
 

@@ -180,6 +180,9 @@ pub mod any;
 /// Types for osu!standard calculations.
 pub mod osu;
 
+/// Types for osu!standard with Relax mod calculations.
+pub mod osurelax;
+
 /// Types for osu!taiko calculations.
 pub mod taiko;
 

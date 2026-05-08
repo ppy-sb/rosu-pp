@@ -95,6 +95,44 @@ impl_from_mode!(
     },
 );
 
+impl<'map> IntoModePerformance<'map, crate::osurelax::OsuRelax>
+    for crate::osurelax::OsuRelaxDifficultyAttributes
+{
+    fn into_performance(
+        self,
+    ) -> <crate::osurelax::OsuRelax as IGameMode>::Performance<'map> {
+        <crate::osurelax::OsuRelax as IGameMode>::Performance::from_map_or_attrs(self.into())
+    }
+}
+
+impl<'map> IntoModePerformance<'map, crate::osurelax::OsuRelax>
+    for crate::osurelax::OsuRelaxPerformanceAttributes
+{
+    fn into_performance(
+        self,
+    ) -> <crate::osurelax::OsuRelax as IGameMode>::Performance<'map> {
+        <crate::osurelax::OsuRelax as IGameMode>::Performance::from_map_or_attrs(
+            self.difficulty.into(),
+        )
+    }
+}
+
+impl<'map> IntoModePerformance<'map, crate::osurelax::OsuRelax> for &'map Beatmap {
+    fn into_performance(
+        self,
+    ) -> <crate::osurelax::OsuRelax as IGameMode>::Performance<'map> {
+        <crate::osurelax::OsuRelax as IGameMode>::Performance::from_map_or_attrs(self.into())
+    }
+}
+
+impl<'a> IntoModePerformance<'a, crate::osurelax::OsuRelax> for Beatmap {
+    fn into_performance(
+        self,
+    ) -> <crate::osurelax::OsuRelax as IGameMode>::Performance<'a> {
+        <crate::osurelax::OsuRelax as IGameMode>::Performance::from_map_or_attrs(self.into())
+    }
+}
+
 impl<'a> IntoPerformance<'a> for Beatmap {
     fn into_performance(self) -> Performance<'a> {
         match self.mode {

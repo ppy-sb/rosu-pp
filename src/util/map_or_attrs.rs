@@ -205,4 +205,9 @@ from_attrs!(
         ManiaDifficultyAttributes,
         ManiaPerformanceAttributes
     },
+    osurelax {
+        OsuRelax,
+        OsuRelaxDifficultyAttributes,
+        OsuRelaxPerformanceAttributes
+    },
 );
