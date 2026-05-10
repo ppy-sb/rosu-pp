@@ -4,7 +4,7 @@ use std::{cmp, f64::consts::PI};
 use crate::{
     any::difficulty::{
         object::{HasStartTime, IDifficultyObject},
-        skills::{strain_decay, StrainSkill},
+        skills::{StrainSkill, strain_decay},
     },
     osurelax::difficulty::object::OsuRelaxDifficultyObject,
     util::{
@@ -98,7 +98,7 @@ struct RelaxAimEvaluator;
 
 impl RelaxAimEvaluator {
     const WIDE_ANGLE_MULTIPLIER: f64 = 1.5;
-    const ACUTE_ANGLE_MULTIPLIER: f64 = 2.6;
+    const ACUTE_ANGLE_MULTIPLIER: f64 = 2.55;
     const SLIDER_MULTIPLIER: f64 = 1.5;
     const VELOCITY_CHANGE_MULTIPLIER: f64 = 1.2;
     const WIGGLE_MULTIPLIER: f64 = 1.02;
@@ -165,23 +165,17 @@ impl RelaxAimEvaluator {
         let stream_nerf = 0.0006 * osu_curr_obj.lazy_jump_dist + 0.86;
         aim_strain *= stream_nerf.clamp(0.92, 0.98);
 
-        // * If rhythms are the same.
-        if osu_curr_obj.strain_time.max(osu_last_obj.strain_time)
-            < 1.25 * osu_curr_obj.strain_time.min(osu_last_obj.strain_time)
-        {
-            if let Some((curr_angle, last_angle)) = osu_curr_obj.angle.zip(osu_last_obj.angle) {
-                // * Rewarding angles, take the smaller velocity as base.
-                let angle_bonus = curr_vel.min(prev_vel);
+        if let Some((curr_angle, last_angle)) = osu_curr_obj.angle.zip(osu_last_obj.angle) {
+            // * Rewarding angles, take the smaller velocity as base.
+            let angle_bonus = curr_vel.min(prev_vel);
 
-                wide_angle_bonus = Self::calc_wide_angle_bonus(curr_angle);
+            // * If rhythms are the same.
+            if osu_curr_obj.strain_time.max(osu_last_obj.strain_time)
+                < 1.25 * osu_curr_obj.strain_time.min(osu_last_obj.strain_time)
+            {
                 acute_angle_bonus = Self::calc_acute_angle_bonus(curr_angle);
 
                 // * Penalize angle repetition.
-                wide_angle_bonus *= 1.0
-                    - f64::min(
-                        wide_angle_bonus,
-                        f64::powf(Self::calc_wide_angle_bonus(last_angle), 3.0),
-                    );
                 acute_angle_bonus *= 0.08
                     + 0.92
                         * (1.0
@@ -199,10 +193,6 @@ impl RelaxAimEvaluator {
                         400.0,
                     ));
 
-                // * Apply full wide angle bonus for distance more than one diameter
-                wide_angle_bonus *= angle_bonus
-                    * smootherstep(osu_curr_obj.lazy_jump_dist, 0.0, f64::from(DIAMETER));
-
                 // * Apply acute angle bonus for BPM above 300 1/2 and distance more than one diameter
                 acute_angle_bonus *= angle_bonus
                     * smootherstep(milliseconds_to_bpm(nerf_strain_time, Some(2)), 300.0, 400.0)
@@ -211,44 +201,66 @@ impl RelaxAimEvaluator {
                         f64::from(DIAMETER),
                         f64::from(DIAMETER * 2),
                     );
+            }
 
-                // R* Penalize wide angles if their distances are quite small (consider as wide angle stream).
-                // R* Only jump dist is considered here, not velocity.
-                // R* Fittings: [(200, 0), (250, 0.5), (300, 1), (350, 1)] linear function.
-                let wide_stream_nerf = osu_curr_obj.lazy_jump_dist * 0.007 - 1.3;
-                wide_angle_bonus *= wide_stream_nerf.clamp(0.0, 1.0);
+            wide_angle_bonus = Self::calc_wide_angle_bonus(curr_angle);
 
-                // * Apply wiggle bonus for jumps that are [radius, 3*diameter] in distance, with < 110 angle
-                // * https://www.desmos.com/calculator/dp0v0nvowc
-                wiggle_bonus = angle_bonus
-                    * smootherstep(
+            // * Penalize angle repetition.
+            wide_angle_bonus *= 1.0
+                - f64::min(
+                    wide_angle_bonus,
+                    f64::powf(Self::calc_wide_angle_bonus(last_angle), 3.0),
+                );
+
+            // * Apply full wide angle bonus for distance more than one diameter
+            wide_angle_bonus *=
+                angle_bonus * smootherstep(osu_curr_obj.lazy_jump_dist, 0.0, f64::from(DIAMETER));
+
+            // R* Penalize wide angles if their distances are quite small (consider as wide angle stream).
+            // R* Only jump dist is considered here, not velocity.
+            // R* Fittings: [(200, 0), (250, 0.5), (300, 1), (350, 1)] linear function.
+            let wide_stream_nerf = osu_curr_obj.lazy_jump_dist * 0.007 - 1.3;
+            wide_angle_bonus *= wide_stream_nerf.clamp(0.0, 1.0);
+
+            // * Apply wiggle bonus for jumps that are [radius, 3*diameter] in distance, with < 110 angle
+            // * https://www.desmos.com/calculator/dp0v0nvowc
+            wiggle_bonus = angle_bonus
+                * smootherstep(
+                    osu_curr_obj.lazy_jump_dist,
+                    f64::from(RADIUS),
+                    f64::from(DIAMETER),
+                )
+                * f64::powf(
+                    reverse_lerp(
                         osu_curr_obj.lazy_jump_dist,
-                        f64::from(RADIUS),
+                        f64::from(DIAMETER * 3),
                         f64::from(DIAMETER),
-                    )
-                    * f64::powf(
-                        reverse_lerp(
-                            osu_curr_obj.lazy_jump_dist,
-                            f64::from(DIAMETER * 3),
-                            f64::from(DIAMETER),
-                        ),
-                        1.8,
-                    )
-                    * smootherstep(curr_angle, f64::to_radians(110.0), f64::to_radians(60.0))
-                    * smootherstep(
+                    ),
+                    1.8,
+                )
+                * smootherstep(curr_angle, f64::to_radians(110.0), f64::to_radians(60.0))
+                * smootherstep(
+                    osu_last_obj.lazy_jump_dist,
+                    f64::from(RADIUS),
+                    f64::from(DIAMETER),
+                )
+                * f64::powf(
+                    reverse_lerp(
                         osu_last_obj.lazy_jump_dist,
-                        f64::from(RADIUS),
+                        f64::from(DIAMETER * 3),
                         f64::from(DIAMETER),
-                    )
-                    * f64::powf(
-                        reverse_lerp(
-                            osu_last_obj.lazy_jump_dist,
-                            f64::from(DIAMETER * 3),
-                            f64::from(DIAMETER),
-                        ),
-                        1.8,
-                    )
-                    * smootherstep(last_angle, f64::to_radians(110.0), f64::to_radians(60.0));
+                    ),
+                    1.8,
+                )
+                * smootherstep(last_angle, f64::to_radians(110.0), f64::to_radians(60.0));
+
+            if let Some(osu_last_2_obj) = curr.previous(2, diff_objects) {
+                let distance =
+                    (osu_last_2_obj.base.stacked_pos() - osu_last_obj.base.stacked_pos()).length();
+
+                if distance < 1.0 {
+                    wide_angle_bonus *= 1.0 - 0.35 * f64::from(1.0 - distance);
+                }
             }
         }
 
@@ -284,19 +296,18 @@ impl RelaxAimEvaluator {
         }
 
         aim_strain += wiggle_bonus * Self::WIGGLE_MULTIPLIER;
+        aim_strain += vel_change_bonus * Self::VELOCITY_CHANGE_MULTIPLIER;
 
-        // * Add in acute angle bonus or wide angle bonus + velocity change bonus, whichever is larger.
-        aim_strain += (acute_angle_bonus * Self::ACUTE_ANGLE_MULTIPLIER).max(
-            wide_angle_bonus * Self::WIDE_ANGLE_MULTIPLIER
-                + vel_change_bonus * Self::VELOCITY_CHANGE_MULTIPLIER,
-        );
+        // * Add in acute angle bonus or wide angle bonus, whichever is larger.
+        aim_strain += (acute_angle_bonus * Self::ACUTE_ANGLE_MULTIPLIER)
+            .max(wide_angle_bonus * Self::WIDE_ANGLE_MULTIPLIER);
 
         // * Add in additional slider velocity bonus.
         if with_slider_travel_dist {
             aim_strain += slider_bonus * Self::SLIDER_MULTIPLIER;
         }
 
-        // * If the distance is small enough, we want to buff the rhythm complexity.
+        // R* If the distance is small enough, we want to buff the rhythm complexity.
         if osu_curr_obj.lazy_jump_dist < 350.0 {
             aim_strain *= RelaxRhythmEvaluator::evaluate_diff_of(curr, diff_objects, hit_window);
         }
@@ -520,8 +531,8 @@ const MIN_DELTA_TIME: i32 = 25;
 
 // Compile-time check in case `OsuRelaxDifficultyObject::MIN_DELTA_TIME` changes
 // but we forget to update this value.
-const _: [(); 0 - !{ MIN_DELTA_TIME - OsuRelaxDifficultyObject::MIN_DELTA_TIME as i32 == 0 } as usize] =
-    [];
+const _: [(); 0 - !{ MIN_DELTA_TIME - OsuRelaxDifficultyObject::MIN_DELTA_TIME as i32 == 0 }
+    as usize] = [];
 
 impl RhythmIsland {
     const fn new(delta_difference_eps: f64) -> Self {

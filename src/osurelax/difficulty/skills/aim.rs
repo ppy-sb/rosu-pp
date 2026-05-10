@@ -3,7 +3,7 @@ use std::f64::consts::FRAC_PI_2;
 use crate::{
     any::difficulty::{
         object::{HasStartTime, IDifficultyObject},
-        skills::{strain_decay, StrainSkill},
+        skills::{StrainSkill, strain_decay},
     },
     osurelax::difficulty::object::OsuRelaxDifficultyObject,
     util::{
@@ -92,7 +92,7 @@ struct AimEvaluator;
 
 impl AimEvaluator {
     const WIDE_ANGLE_MULTIPLIER: f64 = 1.5;
-    const ACUTE_ANGLE_MULTIPLIER: f64 = 2.6;
+    const ACUTE_ANGLE_MULTIPLIER: f64 = 2.55;
     const SLIDER_MULTIPLIER: f64 = 1.35;
     const VELOCITY_CHANGE_MULTIPLIER: f64 = 0.75;
     const WIGGLE_MULTIPLIER: f64 = 1.02;
@@ -153,23 +153,17 @@ impl AimEvaluator {
         // * Start strain with regular velocity.
         let mut aim_strain = curr_vel;
 
-        // * If rhythms are the same.
-        if osu_curr_obj.strain_time.max(osu_last_obj.strain_time)
-            < 1.25 * osu_curr_obj.strain_time.min(osu_last_obj.strain_time)
-        {
-            if let Some((curr_angle, last_angle)) = osu_curr_obj.angle.zip(osu_last_obj.angle) {
-                // * Rewarding angles, take the smaller velocity as base.
-                let angle_bonus = curr_vel.min(prev_vel);
+        if let Some((curr_angle, last_angle)) = osu_curr_obj.angle.zip(osu_last_obj.angle) {
+            // * Rewarding angles, take the smaller velocity as base.
+            let angle_bonus = curr_vel.min(prev_vel);
 
-                wide_angle_bonus = Self::calc_wide_angle_bonus(curr_angle);
+            // * If rhythms are the same.
+            if osu_curr_obj.strain_time.max(osu_last_obj.strain_time)
+                < 1.25 * osu_curr_obj.strain_time.min(osu_last_obj.strain_time)
+            {
                 acute_angle_bonus = Self::calc_acute_angle_bonus(curr_angle);
 
                 // * Penalize angle repetition.
-                wide_angle_bonus *= 1.0
-                    - f64::min(
-                        wide_angle_bonus,
-                        f64::powf(Self::calc_wide_angle_bonus(last_angle), 3.0),
-                    );
                 acute_angle_bonus *= 0.08
                     + 0.92
                         * (1.0
@@ -177,10 +171,6 @@ impl AimEvaluator {
                                 acute_angle_bonus,
                                 f64::powf(Self::calc_acute_angle_bonus(last_angle), 3.0),
                             ));
-
-                // * Apply full wide angle bonus for distance more than one diameter
-                wide_angle_bonus *= angle_bonus
-                    * smootherstep(osu_curr_obj.lazy_jump_dist, 0.0, f64::from(DIAMETER));
 
                 // * Apply acute angle bonus for BPM above 300 1/2 and distance more than one diameter
                 acute_angle_bonus *= angle_bonus
@@ -194,38 +184,60 @@ impl AimEvaluator {
                         f64::from(DIAMETER),
                         f64::from(DIAMETER * 2),
                     );
+            }
 
-                // * Apply wiggle bonus for jumps that are [radius, 3*diameter] in distance, with < 110 angle
-                // * https://www.desmos.com/calculator/dp0v0nvowc
-                wiggle_bonus = angle_bonus
-                    * smootherstep(
+            wide_angle_bonus = Self::calc_wide_angle_bonus(curr_angle);
+
+            // * Penalize angle repetition.
+            wide_angle_bonus *= 1.0
+                - f64::min(
+                    wide_angle_bonus,
+                    f64::powf(Self::calc_wide_angle_bonus(last_angle), 3.0),
+                );
+
+            // * Apply full wide angle bonus for distance more than one diameter
+            wide_angle_bonus *=
+                angle_bonus * smootherstep(osu_curr_obj.lazy_jump_dist, 0.0, f64::from(DIAMETER));
+
+            // * Apply wiggle bonus for jumps that are [radius, 3*diameter] in distance, with < 110 angle
+            // * https://www.desmos.com/calculator/dp0v0nvowc
+            wiggle_bonus = angle_bonus
+                * smootherstep(
+                    osu_curr_obj.lazy_jump_dist,
+                    f64::from(RADIUS),
+                    f64::from(DIAMETER),
+                )
+                * f64::powf(
+                    reverse_lerp(
                         osu_curr_obj.lazy_jump_dist,
-                        f64::from(RADIUS),
+                        f64::from(DIAMETER * 3),
                         f64::from(DIAMETER),
-                    )
-                    * f64::powf(
-                        reverse_lerp(
-                            osu_curr_obj.lazy_jump_dist,
-                            f64::from(DIAMETER * 3),
-                            f64::from(DIAMETER),
-                        ),
-                        1.8,
-                    )
-                    * smootherstep(curr_angle, f64::to_radians(110.0), f64::to_radians(60.0))
-                    * smootherstep(
+                    ),
+                    1.8,
+                )
+                * smootherstep(curr_angle, f64::to_radians(110.0), f64::to_radians(60.0))
+                * smootherstep(
+                    osu_last_obj.lazy_jump_dist,
+                    f64::from(RADIUS),
+                    f64::from(DIAMETER),
+                )
+                * f64::powf(
+                    reverse_lerp(
                         osu_last_obj.lazy_jump_dist,
-                        f64::from(RADIUS),
+                        f64::from(DIAMETER * 3),
                         f64::from(DIAMETER),
-                    )
-                    * f64::powf(
-                        reverse_lerp(
-                            osu_last_obj.lazy_jump_dist,
-                            f64::from(DIAMETER * 3),
-                            f64::from(DIAMETER),
-                        ),
-                        1.8,
-                    )
-                    * smootherstep(last_angle, f64::to_radians(110.0), f64::to_radians(60.0));
+                    ),
+                    1.8,
+                )
+                * smootherstep(last_angle, f64::to_radians(110.0), f64::to_radians(60.0));
+
+            if let Some(osu_last_2_obj) = curr.previous(2, diff_objects) {
+                let distance =
+                    (osu_last_2_obj.base.stacked_pos() - osu_last_obj.base.stacked_pos()).length();
+
+                if distance < 1.0 {
+                    wide_angle_bonus *= 1.0 - 0.35 * f64::from(1.0 - distance);
+                }
             }
         }
 
@@ -261,12 +273,11 @@ impl AimEvaluator {
         }
 
         aim_strain += wiggle_bonus * Self::WIGGLE_MULTIPLIER;
+        aim_strain += vel_change_bonus * Self::VELOCITY_CHANGE_MULTIPLIER;
 
-        // * Add in acute angle bonus or wide angle bonus + velocity change bonus, whichever is larger.
-        aim_strain += (acute_angle_bonus * Self::ACUTE_ANGLE_MULTIPLIER).max(
-            wide_angle_bonus * Self::WIDE_ANGLE_MULTIPLIER
-                + vel_change_bonus * Self::VELOCITY_CHANGE_MULTIPLIER,
-        );
+        // * Add in acute angle bonus or wide angle bonus, whichever is larger.
+        aim_strain += (acute_angle_bonus * Self::ACUTE_ANGLE_MULTIPLIER)
+            .max(wide_angle_bonus * Self::WIDE_ANGLE_MULTIPLIER);
 
         // * Add in additional slider velocity bonus.
         if with_slider_travel_dist {
