@@ -36,6 +36,10 @@ pub struct OsuRelaxScoreState {
     pub n50: u32,
     /// Amount of current misses.
     pub misses: u32,
+    /// Legacy total score.
+    ///
+    /// Only relevant for osu!stable
+    pub legacy_total_score: Option<u32>,
 }
 
 impl OsuRelaxScoreState {
@@ -50,6 +54,7 @@ impl OsuRelaxScoreState {
             n100: 0,
             n50: 0,
             misses: 0,
+            legacy_total_score: None,
         }
     }
 
@@ -112,6 +117,7 @@ impl From<crate::osu::OsuScoreState> for OsuRelaxScoreState {
             n100: s.hitresults.n100,
             n50: s.hitresults.n50,
             misses: s.hitresults.misses,
+            legacy_total_score: s.legacy_total_score,
         }
     }
 }
