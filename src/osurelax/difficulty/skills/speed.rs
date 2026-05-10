@@ -1,14 +1,12 @@
-use std::{cmp, f64::consts::PI};
+use std::cmp;
 
 use crate::{
     any::difficulty::{
         object::{HasStartTime, IDifficultyObject},
-        skills::{strain_decay, StrainSkill},
+        skills::{StrainSkill, strain_decay},
     },
     osurelax::difficulty::object::OsuRelaxDifficultyObject,
-    util::{
-        difficulty::{bpm_to_milliseconds, logistic, milliseconds_to_bpm},
-    },
+    util::difficulty::{bpm_to_milliseconds, logistic, milliseconds_to_bpm, smoothstep_bell_curve},
 };
 
 use super::strain::OsuStrainSkill;
@@ -24,7 +22,7 @@ define_skill! {
 }
 
 impl Speed {
-    const SKILL_MULTIPLIER: f64 = 1.46;
+    const SKILL_MULTIPLIER: f64 = 1.47;
     const STRAIN_DECAY_BASE: f64 = 0.3;
     const REDUCED_SECTION_COUNT: usize = 5;
 
@@ -91,10 +89,11 @@ impl OsuStrainSkill for Speed {}
 struct SpeedEvaluator;
 
 impl SpeedEvaluator {
-    const SINGLE_SPACING_THRESHOLD: f64 = OsuRelaxDifficultyObject::NORMALIZED_DIAMETER as f64 * 1.25; // 1.25 circlers distance between centers
+    const SINGLE_SPACING_THRESHOLD: f64 =
+        OsuRelaxDifficultyObject::NORMALIZED_DIAMETER as f64 * 1.25; // 1.25 circlers distance between centers
     const MIN_SPEED_BONUS: f64 = 200.0; // 200 BPM 1/4th
     const SPEED_BALANCING_FACTOR: f64 = 40.0;
-    const DIST_MULTIPLIER: f64 = 0.9;
+    const DIST_MULTIPLIER: f64 = 0.8;
 
     fn evaluate_diff_of<'a>(
         curr: &'a OsuRelaxDifficultyObject<'a>,
@@ -142,6 +141,8 @@ impl SpeedEvaluator {
         let mut dist_bonus =
             (dist / Self::SINGLE_SPACING_THRESHOLD).powf(3.95) * Self::DIST_MULTIPLIER;
 
+        dist_bonus *= osu_curr_obj.small_circle_bonus.sqrt();
+
         if autopilot {
             dist_bonus = 0.0;
         }
@@ -159,11 +160,11 @@ struct RhythmEvaluator;
 impl RhythmEvaluator {
     const HISTORY_TIME_MAX: u32 = 5 * 1000; // 5 seconds
     const HISTORY_OBJECTS_MAX: usize = 32;
-    const RHYTHM_OVERALL_MULTIPLIER: f64 = 0.95;
-    const RHYTHM_RATIO_MULTIPLIER: f64 = 12.0;
+    const RHYTHM_OVERALL_MULTIPLIER: f64 = 1.0;
+    const RHYTHM_RATIO_MULTIPLIER: f64 = 15.0;
 
-    #[allow(clippy::too_many_lines)]
-    fn evaluate_diff_of<'a>(
+    #[expect(clippy::too_many_lines, reason = "staying in-sync with lazer")]
+    pub fn evaluate_diff_of<'a>(
         curr: &'a OsuRelaxDifficultyObject<'a>,
         diff_objects: &'a [OsuRelaxDifficultyObject<'a>],
         hit_window: f64,
@@ -222,32 +223,33 @@ impl RhythmEvaluator {
                 // * either we're limited by time or limited by object count.
                 let curr_historical_decay = note_decay.min(time_decay);
 
-                let curr_delta = curr_obj.strain_time;
-                let prev_delta = prev_obj.strain_time;
-                let last_delta = last_obj.strain_time;
+                // * Use custom cap value to ensure that at this point delta time is actually zero
+                let curr_delta = curr_obj.delta_time.max(1e-7);
+                let prev_delta = prev_obj.delta_time.max(1e-7);
+                let last_delta = last_obj.delta_time.max(1e-7);
 
                 // * calculate how much current delta difference deserves a rhythm bonus
                 // * this function is meant to reduce rhythm bonus for deltas that are multiples of each other (i.e 100 and 200)
-                let delta_difference_ratio =
-                    prev_delta.min(curr_delta) / prev_delta.max(curr_delta);
+                let delta_difference = prev_delta.max(curr_delta) / prev_delta.min(curr_delta);
+
+                // * Take only the fractional part of the value since we're only interested in punishing multiples
+                let delta_difference_fraction = delta_difference - delta_difference.trunc();
+
                 let curr_ratio = 1.0
                     + Self::RHYTHM_RATIO_MULTIPLIER
-                        * (PI / delta_difference_ratio).sin().powf(2.0).min(0.5);
+                        * smoothstep_bell_curve(delta_difference_fraction, 0.5, 0.5).min(0.5);
 
-                // reduce ratio bonus if delta difference is too big
-                let fraction = (prev_delta / curr_delta).max(curr_delta / prev_delta);
-                let fraction_multiplier = (2.0 - fraction / 8.0).clamp(0.0, 1.0);
+                // * reduce ratio bonus if delta difference is too big
+                let difference_multiplier = (2.0 - delta_difference / 8.0).clamp(0.0, 1.0);
 
                 let window_penalty = (((prev_delta - curr_delta).abs() - delta_difference_eps)
                     .max(0.0)
                     / delta_difference_eps)
                     .min(1.0);
 
-                let mut effective_ratio = window_penalty * curr_ratio * fraction_multiplier;
+                let mut effective_ratio = window_penalty * curr_ratio * difference_multiplier;
 
                 if first_delta_switch {
-                    // Keep in-sync with lazer
-                    #[allow(clippy::if_not_else)]
                     if (prev_delta - curr_delta).abs() < delta_difference_eps {
                         // * island is still progressing
                         island.add_delta(curr_delta as i32);
@@ -346,7 +348,11 @@ impl RhythmEvaluator {
         }
 
         // * produces multiplier that can be applied to strain. range [1, infinity) (not really though)
-        (4.0 + rhythm_complexity_sum * Self::RHYTHM_OVERALL_MULTIPLIER).sqrt() / 2.0
+        let mut rhythm_difficulty =
+            (4.0 + rhythm_complexity_sum * Self::RHYTHM_OVERALL_MULTIPLIER).sqrt() / 2.0;
+        rhythm_difficulty *= 1.0 - curr.get_doubletapness(curr.next(0, diff_objects), hit_window);
+
+        rhythm_difficulty
     }
 }
 
@@ -359,10 +365,10 @@ struct RhythmIsland {
 
 const MIN_DELTA_TIME: i32 = 25;
 
-// Compile-time check in case `OsuRelaxDifficultyObject::MIN_DELTA_TIME` changes
+// Compile-time check in case `OsuDifficultyObject::MIN_DELTA_TIME` changes
 // but we forget to update this value.
-const _: [(); 0 - !{ MIN_DELTA_TIME - OsuRelaxDifficultyObject::MIN_DELTA_TIME as i32 == 0 } as usize] =
-    [];
+const _: [(); 0 - !{ MIN_DELTA_TIME - OsuRelaxDifficultyObject::MIN_DELTA_TIME as i32 == 0 }
+    as usize] = [];
 
 impl RhythmIsland {
     const fn new(delta_difference_eps: f64) -> Self {
@@ -376,14 +382,14 @@ impl RhythmIsland {
     fn new_with_delta(delta: i32, delta_difference_eps: f64) -> Self {
         Self {
             delta_difference_eps,
-            delta: delta.max(MIN_DELTA_TIME),
+            delta: cmp::max(delta, MIN_DELTA_TIME),
             delta_count: 1,
         }
     }
 
     fn add_delta(&mut self, delta: i32) {
         if self.delta == i32::MAX {
-            self.delta = delta.max(MIN_DELTA_TIME);
+            self.delta = cmp::max(delta, MIN_DELTA_TIME);
         }
 
         self.delta_count += 1;

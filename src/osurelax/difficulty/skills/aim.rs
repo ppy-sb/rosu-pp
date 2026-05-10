@@ -279,6 +279,8 @@ impl AimEvaluator {
         aim_strain += (acute_angle_bonus * Self::ACUTE_ANGLE_MULTIPLIER)
             .max(wide_angle_bonus * Self::WIDE_ANGLE_MULTIPLIER);
 
+        aim_strain *= osu_curr_obj.small_circle_bonus;
+
         // * Add in additional slider velocity bonus.
         if with_slider_travel_dist {
             aim_strain += slider_bonus * Self::SLIDER_MULTIPLIER;

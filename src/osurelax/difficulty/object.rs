@@ -7,7 +7,7 @@ use crate::{
     osurelax::object::{OsuRelaxObject, OsuRelaxObjectKind, OsuSlider},
 };
 
-use super::{scaling_factor::ScalingFactor, HD_FADE_OUT_DURATION_MULTIPLIER};
+use super::{HD_FADE_OUT_DURATION_MULTIPLIER, scaling_factor::ScalingFactor};
 
 pub struct OsuRelaxDifficultyObject<'a> {
     pub idx: usize,
@@ -22,6 +22,8 @@ pub struct OsuRelaxDifficultyObject<'a> {
     pub travel_dist: f64,
     pub travel_time: f64,
     pub angle: Option<f64>,
+
+    pub small_circle_bonus: f64,
 }
 
 impl<'a> OsuRelaxDifficultyObject<'a> {
@@ -44,6 +46,7 @@ impl<'a> OsuRelaxDifficultyObject<'a> {
         let start_time = hit_object.start_time / clock_rate;
 
         let strain_time = delta_time.max(Self::MIN_DELTA_TIME);
+        let small_circle_bonus = (1.0 + (30.0 - scaling_factor.radius) / 40.0).max(1.0);
 
         let mut this = Self {
             idx,
@@ -57,6 +60,7 @@ impl<'a> OsuRelaxDifficultyObject<'a> {
             travel_dist: 0.0,
             travel_time: 0.0,
             angle: None,
+            small_circle_bonus,
         };
 
         this.set_distances(last_object, last_last_object, clock_rate, scaling_factor);
@@ -149,7 +153,8 @@ impl<'a> OsuRelaxDifficultyObject<'a> {
                 (stacked_tail_pos - self.base.stacked_pos()).length() * scaling_factor;
 
             let diff = f64::from(
-                OsuRelaxDifficultyObject::MAX_SLIDER_RADIUS - OsuRelaxDifficultyObject::ASSUMED_SLIDER_RADIUS,
+                OsuRelaxDifficultyObject::MAX_SLIDER_RADIUS
+                    - OsuRelaxDifficultyObject::ASSUMED_SLIDER_RADIUS,
             );
 
             let min = f64::from(tail_jump_dist - OsuRelaxDifficultyObject::MAX_SLIDER_RADIUS);

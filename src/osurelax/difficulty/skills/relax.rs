@@ -1,6 +1,7 @@
+use std::cmp;
 use std::f64::consts::FRAC_PI_2;
-use std::{cmp, f64::consts::PI};
 
+use crate::util::difficulty::smoothstep_bell_curve;
 use crate::{
     any::difficulty::{
         object::{HasStartTime, IDifficultyObject},
@@ -302,6 +303,8 @@ impl RelaxAimEvaluator {
         aim_strain += (acute_angle_bonus * Self::ACUTE_ANGLE_MULTIPLIER)
             .max(wide_angle_bonus * Self::WIDE_ANGLE_MULTIPLIER);
 
+        aim_strain *= osu_curr_obj.small_circle_bonus;
+
         // * Add in additional slider velocity bonus.
         if with_slider_travel_dist {
             aim_strain += slider_bonus * Self::SLIDER_MULTIPLIER;
@@ -329,11 +332,11 @@ struct RelaxRhythmEvaluator;
 impl RelaxRhythmEvaluator {
     const HISTORY_TIME_MAX: u32 = 5 * 1000; // 5 seconds
     const HISTORY_OBJECTS_MAX: usize = 32;
-    const RHYTHM_OVERALL_MULTIPLIER: f64 = 0.95;
-    const RHYTHM_RATIO_MULTIPLIER: f64 = 12.0;
+    const RHYTHM_OVERALL_MULTIPLIER: f64 = 1.0;
+    const RHYTHM_RATIO_MULTIPLIER: f64 = 15.0;
 
-    #[allow(clippy::too_many_lines)]
-    fn evaluate_diff_of<'a>(
+    #[expect(clippy::too_many_lines, reason = "staying in-sync with lazer")]
+    pub fn evaluate_diff_of<'a>(
         curr: &'a OsuRelaxDifficultyObject<'a>,
         diff_objects: &'a [OsuRelaxDifficultyObject<'a>],
         hit_window: f64,
@@ -392,32 +395,33 @@ impl RelaxRhythmEvaluator {
                 // * either we're limited by time or limited by object count.
                 let curr_historical_decay = note_decay.min(time_decay);
 
-                let curr_delta = curr_obj.strain_time;
-                let prev_delta = prev_obj.strain_time;
-                let last_delta = last_obj.strain_time;
+                // * Use custom cap value to ensure that at this point delta time is actually zero
+                let curr_delta = curr_obj.delta_time.max(1e-7);
+                let prev_delta = prev_obj.delta_time.max(1e-7);
+                let last_delta = last_obj.delta_time.max(1e-7);
 
                 // * calculate how much current delta difference deserves a rhythm bonus
                 // * this function is meant to reduce rhythm bonus for deltas that are multiples of each other (i.e 100 and 200)
-                let delta_difference_ratio =
-                    prev_delta.min(curr_delta) / prev_delta.max(curr_delta);
+                let delta_difference = prev_delta.max(curr_delta) / prev_delta.min(curr_delta);
+
+                // * Take only the fractional part of the value since we're only interested in punishing multiples
+                let delta_difference_fraction = delta_difference - delta_difference.trunc();
+
                 let curr_ratio = 1.0
                     + Self::RHYTHM_RATIO_MULTIPLIER
-                        * (PI / delta_difference_ratio).sin().powf(2.0).min(0.5);
+                        * smoothstep_bell_curve(delta_difference_fraction, 0.5, 0.5).min(0.5);
 
-                // reduce ratio bonus if delta difference is too big
-                let fraction = (prev_delta / curr_delta).max(curr_delta / prev_delta);
-                let fraction_multiplier = (2.0 - fraction / 8.0).clamp(0.0, 1.0);
+                // * reduce ratio bonus if delta difference is too big
+                let difference_multiplier = (2.0 - delta_difference / 8.0).clamp(0.0, 1.0);
 
                 let window_penalty = (((prev_delta - curr_delta).abs() - delta_difference_eps)
                     .max(0.0)
                     / delta_difference_eps)
                     .min(1.0);
 
-                let mut effective_ratio = window_penalty * curr_ratio * fraction_multiplier;
+                let mut effective_ratio = window_penalty * curr_ratio * difference_multiplier;
 
                 if first_delta_switch {
-                    // Keep in-sync with lazer
-                    #[allow(clippy::if_not_else)]
                     if (prev_delta - curr_delta).abs() < delta_difference_eps {
                         // * island is still progressing
                         island.add_delta(curr_delta as i32);
@@ -516,7 +520,11 @@ impl RelaxRhythmEvaluator {
         }
 
         // * produces multiplier that can be applied to strain. range [1, infinity) (not really though)
-        (4.0 + rhythm_complexity_sum * Self::RHYTHM_OVERALL_MULTIPLIER).sqrt() / 2.0
+        let mut rhythm_difficulty =
+            (4.0 + rhythm_complexity_sum * Self::RHYTHM_OVERALL_MULTIPLIER).sqrt() / 2.0;
+        rhythm_difficulty *= 1.0 - curr.get_doubletapness(curr.next(0, diff_objects), hit_window);
+
+        rhythm_difficulty
     }
 }
 
@@ -546,14 +554,14 @@ impl RhythmIsland {
     fn new_with_delta(delta: i32, delta_difference_eps: f64) -> Self {
         Self {
             delta_difference_eps,
-            delta: delta.max(MIN_DELTA_TIME),
+            delta: cmp::max(delta, MIN_DELTA_TIME),
             delta_count: 1,
         }
     }
 
     fn add_delta(&mut self, delta: i32) {
         if self.delta == i32::MAX {
-            self.delta = delta.max(MIN_DELTA_TIME);
+            self.delta = cmp::max(delta, MIN_DELTA_TIME);
         }
 
         self.delta_count += 1;
