@@ -124,8 +124,8 @@ impl OsuGradualPerformance {
             .performance()
             .lazer(self.lazer)
             .state(state)
-            .difficulty(self.difficulty.difficulty.clone())
-            .passed_objects(self.difficulty.idx as u32)
+            .difficulty(self.difficulty.difficulty().clone())
+            .passed_objects(self.difficulty.idx() as u32)
             .calculate()
             .expect("no conversion required");
 
@@ -150,6 +150,54 @@ mod tests {
         let map = Beatmap::from_path("./resources/2785319.osu").unwrap();
 
         let difficulty = Difficulty::new().mods(88); // HDHRDT
+
+        let mut gradual = OsuGradualPerformance::new(difficulty.clone(), &map).unwrap();
+        let mut gradual_2nd = OsuGradualPerformance::new(difficulty.clone(), &map).unwrap();
+        let mut gradual_3rd = OsuGradualPerformance::new(difficulty.clone(), &map).unwrap();
+
+        let mut state = OsuScoreState::default();
+
+        let hit_objects_len = map.hit_objects.len();
+
+        for i in 1.. {
+            state.hitresults.misses += 1;
+
+            let Some(next_gradual) = gradual.next(state.clone()) else {
+                assert_eq!(i, hit_objects_len + 1);
+                assert!(gradual_2nd.last(state.clone()).is_some() || hit_objects_len % 2 == 0);
+                assert!(gradual_3rd.last(state.clone()).is_some() || hit_objects_len % 3 == 0);
+                break;
+            };
+
+            if i % 2 == 0 {
+                let next_gradual_2nd = gradual_2nd.nth(state.clone(), 1).unwrap();
+                assert_eq!(next_gradual, next_gradual_2nd);
+            }
+
+            if i % 3 == 0 {
+                let next_gradual_3rd = gradual_3rd.nth(state.clone(), 2).unwrap();
+                assert_eq!(next_gradual, next_gradual_3rd);
+            }
+
+            let mut regular_calc = OsuPerformance::new(&map)
+                .difficulty(difficulty.clone())
+                .passed_objects(i as u32)
+                .state(state.clone());
+
+            let regular_state = regular_calc.generate_state().unwrap();
+            assert_eq!(state.clone(), regular_state);
+
+            let expected = regular_calc.calculate().unwrap();
+
+            assert_eq!(next_gradual, expected);
+        }
+    }
+
+    #[test]
+    fn next_and_nth_relax() {
+        let map = Beatmap::from_path("./resources/2785319.osu").unwrap();
+
+        let difficulty = Difficulty::new().mods(128); // RX
 
         let mut gradual = OsuGradualPerformance::new(difficulty.clone(), &map).unwrap();
         let mut gradual_2nd = OsuGradualPerformance::new(difficulty.clone(), &map).unwrap();

@@ -12,6 +12,7 @@ use crate::{
         object::{OsuObject, OsuObjectKind},
         utils::legacy_score::GradualNestedScorePerObject,
     },
+    osurelax::OsuRelaxGradualDifficulty,
 };
 
 use self::osu_objects::OsuObjects;
@@ -48,13 +49,20 @@ use super::{
 /// let attrs2 = iter.next();
 ///
 /// // Remaining hit objects
+/// // (Note: with Relax mods, this automatically uses the osurelax calculator)
 /// for difficulty in iter {
 ///     // ...
 /// }
 /// ```
 ///
 /// [`OsuGradualPerformance`]: crate::osu::OsuGradualPerformance
-pub struct OsuGradualDifficulty {
+#[allow(private_interfaces)]
+pub enum OsuGradualDifficulty {
+    Standard(OsuGradualDifficultyStandard),
+    Relax(OsuRelaxGradualDifficulty),
+}
+
+pub(crate) struct OsuGradualDifficultyStandard {
     pub(crate) idx: usize,
     pub(crate) difficulty: Difficulty,
     attrs: OsuDifficultyAttributes,
@@ -76,21 +84,45 @@ struct NotClonable;
 
 impl OsuGradualDifficulty {
     /// Create a new difficulty attributes iterator for osu!standard maps.
+    ///
+    /// If the difficulty has Relax mods, this automatically uses the osurelax calculator.
     pub fn new(difficulty: Difficulty, map: &Beatmap) -> Result<Self, ConvertError> {
+        if difficulty.get_mods().rx() {
+            return OsuRelaxGradualDifficulty::new(difficulty, map).map(Self::Relax);
+        }
         let map = super::prepare_map(&difficulty, map)?;
-
-        Ok(new(difficulty, &map))
+        Ok(Self::Standard(new_standard(difficulty, &map)))
     }
 
     /// Same as [`OsuGradualDifficulty::new`] but verifies that the map is not
     /// suspicious.
     pub fn checked_new(difficulty: Difficulty, map: &Beatmap) -> Result<Self, CalculateError> {
+        if difficulty.get_mods().rx() {
+            return OsuRelaxGradualDifficulty::new(difficulty, map)
+                .map(Self::Relax)
+                .map_err(CalculateError::from);
+        }
         let map = super::prepare_map(&difficulty, map)?;
         map.check_suspicion()?;
-
-        Ok(new(difficulty, &map))
+        Ok(Self::Standard(new_standard(difficulty, &map)))
     }
 
+    pub(crate) fn idx(&self) -> usize {
+        match self {
+            Self::Standard(s) => s.idx,
+            Self::Relax(r) => r.idx,
+        }
+    }
+
+    pub(crate) fn difficulty(&self) -> &Difficulty {
+        match self {
+            Self::Standard(s) => &s.difficulty,
+            Self::Relax(r) => &r.difficulty,
+        }
+    }
+}
+
+impl OsuGradualDifficultyStandard {
     fn increment_combo(h: &OsuObject, attrs: &mut OsuDifficultyAttributes) {
         attrs.max_combo += 1;
 
@@ -106,7 +138,7 @@ impl OsuGradualDifficulty {
     }
 }
 
-fn new(difficulty: Difficulty, map: &Beatmap) -> OsuGradualDifficulty {
+fn new_standard(difficulty: Difficulty, map: &Beatmap) -> OsuGradualDifficultyStandard {
     debug_assert_eq!(map.mode, GameMode::Osu);
 
     let mods = difficulty.get_mods();
@@ -134,7 +166,7 @@ fn new(difficulty: Difficulty, map: &Beatmap) -> OsuGradualDifficulty {
     attrs.max_combo = 0;
 
     if let Some(h) = osu_objects.first() {
-        OsuGradualDifficulty::increment_combo(h, &mut attrs);
+        OsuGradualDifficultyStandard::increment_combo(h, &mut attrs);
     }
 
     let mut osu_objects = OsuObjects::new(osu_objects);
@@ -153,7 +185,7 @@ fn new(difficulty: Difficulty, map: &Beatmap) -> OsuGradualDifficulty {
     let score_simulator = GradualLegacyScoreSimulator::new(map, map_attrs);
     let nested_score = GradualNestedScorePerObject::default();
 
-    OsuGradualDifficulty {
+    OsuGradualDifficultyStandard {
         idx: 0,
         difficulty,
         attrs,
@@ -175,7 +207,7 @@ fn extend_lifetime(
     unsafe { mem::transmute(diff_objects) }
 }
 
-impl Iterator for OsuGradualDifficulty {
+impl Iterator for OsuGradualDifficultyStandard {
     type Item = OsuDifficultyAttributes;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -266,9 +298,43 @@ impl Iterator for OsuGradualDifficulty {
     }
 }
 
-impl ExactSizeIterator for OsuGradualDifficulty {
+impl ExactSizeIterator for OsuGradualDifficultyStandard {
     fn len(&self) -> usize {
         self.diff_objects.len() + 1 - self.idx
+    }
+}
+
+impl Iterator for OsuGradualDifficulty {
+    type Item = OsuDifficultyAttributes;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Standard(s) => s.next(),
+            Self::Relax(r) => r.next().map(Into::into),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            Self::Standard(s) => s.size_hint(),
+            Self::Relax(r) => r.size_hint(),
+        }
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        match self {
+            Self::Standard(s) => s.nth(n),
+            Self::Relax(r) => r.nth(n).map(Into::into),
+        }
+    }
+}
+
+impl ExactSizeIterator for OsuGradualDifficulty {
+    fn len(&self) -> usize {
+        match self {
+            Self::Standard(s) => s.len(),
+            Self::Relax(r) => r.len(),
+        }
     }
 }
 
@@ -319,6 +385,46 @@ mod tests {
         let map = Beatmap::from_path("./resources/2785319.osu").unwrap();
 
         let difficulty = Difficulty::new();
+
+        let mut gradual = OsuGradualDifficulty::new(difficulty.clone(), &map).unwrap();
+        let mut gradual_2nd = OsuGradualDifficulty::new(difficulty.clone(), &map).unwrap();
+        let mut gradual_3rd = OsuGradualDifficulty::new(difficulty.clone(), &map).unwrap();
+
+        let hit_objects_len = map.hit_objects.len();
+
+        for i in 1.. {
+            let Some(next_gradual) = gradual.next() else {
+                assert_eq!(i, hit_objects_len + 1);
+                assert!(gradual_2nd.last().is_some() || hit_objects_len % 2 == 0);
+                assert!(gradual_3rd.last().is_some() || hit_objects_len % 3 == 0);
+                break;
+            };
+
+            if i % 2 == 0 {
+                let next_gradual_2nd = gradual_2nd.nth(1).unwrap();
+                assert_eq!(next_gradual, next_gradual_2nd);
+            }
+
+            if i % 3 == 0 {
+                let next_gradual_3rd = gradual_3rd.nth(2).unwrap();
+                assert_eq!(next_gradual, next_gradual_3rd);
+            }
+
+            let expected = difficulty
+                .clone()
+                .passed_objects(i as u32)
+                .calculate_for_mode::<Osu>(&map)
+                .unwrap();
+
+            assert_eq!(next_gradual, expected);
+        }
+    }
+
+    #[test]
+    fn next_and_nth_relax() {
+        let map = Beatmap::from_path("./resources/2785319.osu").unwrap();
+
+        let difficulty = Difficulty::new().mods(128); // RX
 
         let mut gradual = OsuGradualDifficulty::new(difficulty.clone(), &map).unwrap();
         let mut gradual_2nd = OsuGradualDifficulty::new(difficulty.clone(), &map).unwrap();

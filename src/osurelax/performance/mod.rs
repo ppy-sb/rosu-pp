@@ -1105,6 +1105,7 @@ mod test {
             n100: 20,
             n50: 279,
             misses: 2,
+            legacy_total_score: None,
         };
 
         assert_eq!(state, expected);
@@ -1131,6 +1132,7 @@ mod test {
             n100: 289,
             n50: 10,
             misses: 2,
+            legacy_total_score: None,
         };
 
         assert_eq!(state, expected);
@@ -1156,6 +1158,7 @@ mod test {
             n100: 589,
             n50: 10,
             misses: 2,
+            legacy_total_score: None,
         };
 
         assert_eq!(state, expected);
@@ -1183,6 +1186,7 @@ mod test {
             n100: 50,
             n50: 249,
             misses: 2,
+            legacy_total_score: None,
         };
 
         assert_eq!(state, expected);
