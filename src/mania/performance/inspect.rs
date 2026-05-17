@@ -42,7 +42,8 @@ impl InspectManiaPerformance<'_> {
     }
 
     pub fn is_classic(&self) -> bool {
-        !self.difficulty.get_lazer() || self.difficulty.get_mods().cl()
+        (!self.difficulty.get_lazer() && !self.difficulty.get_mods().sv2())
+            || self.difficulty.get_mods().cl()
     }
 }
 
