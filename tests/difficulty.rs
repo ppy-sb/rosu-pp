@@ -525,14 +525,14 @@ fn basic_mania() {
     test_cases! {
         Mania: MANIA {
             NM => {
-                stars: 3.358304846842773,
+                stars: 3.7126062330097978,
                 n_objects: 594,
                 n_hold_notes: 121,
                 max_combo: 956,
                 is_convert: false,
             };
             DT => {
-                stars: 4.6072892053157295,
+                stars: 5.4512352746465265,
                 n_objects: 594,
                 n_hold_notes: 121,
                 max_combo: 956,
@@ -547,14 +547,14 @@ fn convert_mania() {
     test_cases! {
         Mania: OSU {
             NM => {
-                stars: 3.2033142085672255,
+                stars: 3.7366369048136425,
                 n_objects: 1046,
                 n_hold_notes: 266,
                 max_combo: 1381,
                 is_convert: true,
             };
             DT => {
-                stars: 4.2934063021960185,
+                stars: 5.317160748611828,
                 n_objects: 1046,
                 n_hold_notes: 266,
                 max_combo: 1381,

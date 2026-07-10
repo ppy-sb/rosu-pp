@@ -22,9 +22,8 @@ use super::attributes::ManiaDifficultyAttributes;
 mod evaluators;
 pub mod gradual;
 mod object;
+mod rebirth;
 mod skills;
-
-const DIFFICULTY_MULTIPLIER: f64 = 0.018;
 
 pub fn difficulty(
     difficulty: &Difficulty,
@@ -51,9 +50,10 @@ fn calculate_difficulty(difficulty: &Difficulty, map: &Beatmap) -> ManiaDifficul
     let n_objects = cmp::min(difficulty.get_passed_objects(), map.hit_objects.len()) as u32;
 
     let values = DifficultyValues::calculate(difficulty, map);
+    let stars = rebirth::calculate_stars(difficulty, map);
 
     ManiaDifficultyAttributes {
-        stars: values.strain.into_difficulty_value() * DIFFICULTY_MULTIPLIER,
+        stars,
         max_combo: values.max_combo,
         n_objects,
         n_hold_notes: values.n_hold_notes,
