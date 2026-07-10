@@ -6,6 +6,7 @@ use crate::model::{
     hit_object::{HitObject, HitObjectKind, HoldNote, Spinner},
 };
 
+#[derive(Clone, Copy)]
 pub struct ManiaObject {
     pub start_time: f64,
     pub end_time: f64,

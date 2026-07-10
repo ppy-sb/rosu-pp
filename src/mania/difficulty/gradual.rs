@@ -11,8 +11,8 @@ use crate::{
 };
 
 use super::{
-    DIFFICULTY_MULTIPLIER, DifficultyValues, ManiaDifficultyAttributes, ManiaObject,
-    object::ManiaDifficultyObject, skills::strain::Strain,
+    DifficultyValues, ManiaDifficultyAttributes, ManiaObject, object::ManiaDifficultyObject,
+    skills::strain::Strain,
 };
 
 /// Gradually calculate the difficulty attributes of an osu!mania map.
@@ -52,6 +52,10 @@ pub struct ManiaGradualDifficulty {
     pub(crate) difficulty: Difficulty,
     objects_is_circle: Box<[bool]>,
     is_convert: bool,
+    total_columns: usize,
+    od: f32,
+    clock_rate: f64,
+    mania_objects: Box<[ManiaObject]>,
     strain: Strain,
     diff_objects: Box<[RefCount<ManiaDifficultyObject>]>,
     note_state: NoteState,
@@ -86,22 +90,24 @@ fn new(difficulty: Difficulty, map: &Beatmap) -> ManiaGradualDifficulty {
 
     let take = difficulty.get_passed_objects();
     let total_columns = map.cs.round_ties_even().max(1.0);
+    let total_columns_usize = total_columns as usize;
     let clock_rate = difficulty.get_clock_rate();
     let mut params = ObjectParams::new(map);
 
-    let mania_objects = map
+    let mania_objects: Box<[_]> = map
         .hit_objects
         .iter()
         .map(|h| ManiaObject::new(h, total_columns, &mut params))
-        .take(take);
+        .take(take)
+        .collect();
 
     let diff_objects = DifficultyValues::create_difficulty_objects(
         clock_rate,
-        total_columns as usize,
-        mania_objects,
+        total_columns_usize,
+        mania_objects.iter().copied(),
     );
 
-    let strain = Strain::new(total_columns as usize);
+    let strain = Strain::new(total_columns_usize);
 
     let mut note_state = NoteState::default();
 
@@ -123,6 +129,10 @@ fn new(difficulty: Difficulty, map: &Beatmap) -> ManiaGradualDifficulty {
         difficulty,
         objects_is_circle,
         is_convert: map.is_convert,
+        total_columns: total_columns_usize,
+        od: map.od,
+        clock_rate,
+        mania_objects,
         strain,
         diff_objects,
         note_state,
@@ -155,7 +165,12 @@ impl Iterator for ManiaGradualDifficulty {
         self.idx += 1;
 
         Some(ManiaDifficultyAttributes {
-            stars: self.strain.cloned_difficulty_value() * DIFFICULTY_MULTIPLIER,
+            stars: super::rebirth::calculate_stars_for_objects(
+                self.total_columns,
+                self.od,
+                self.clock_rate,
+                self.mania_objects.iter().take(self.idx).copied(),
+            ),
             max_combo: self.note_state.curr_combo,
             n_objects: self.idx as u32,
             n_hold_notes: self.note_state.n_hold_notes,
