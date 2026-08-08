@@ -144,29 +144,38 @@ pub(super) fn calculate_params(difficulty: &Difficulty, map: &Beatmap) -> Rebirt
         .map(|h| ManiaObject::new(h, total_columns as f32, &mut params))
         .take(take);
 
-    calculate_params_for_objects(total_columns, map.od, clock_rate, objects)
+    calculate_params_for_objects(total_columns, map.od, clock_rate, is_classic(difficulty), objects)
 }
 
 pub(super) fn calculate_stars_for_objects(
     total_columns: usize,
     od: f32,
     clock_rate: f64,
+    classic: bool,
     objects: impl IntoIterator<Item = ManiaObject>,
 ) -> f64 {
-    calculate_params_for_objects(total_columns, od, clock_rate, objects).sr
+    calculate_params_for_objects(total_columns, od, clock_rate, classic, objects).sr
 }
 
 pub(super) fn calculate_params_for_objects(
     total_columns: usize,
     od: f32,
     clock_rate: f64,
+    classic: bool,
     objects: impl IntoIterator<Item = ManiaObject>,
 ) -> RebirthParams {
     let Some(data) = prepare_data(total_columns, od, clock_rate, objects) else {
         return RebirthParams::default();
     };
 
-    calculate_from_data(data)
+    calculate_from_data(data, classic)
+}
+
+/// Whether the score is a classic (osu!stable default / lazer with CL mod)
+/// style play, i.e. long notes give a single judgement and the difficulty
+/// weights use the head-only density.
+fn is_classic(difficulty: &Difficulty) -> bool {
+    (!difficulty.get_lazer() && !difficulty.get_mods().sv2()) || difficulty.get_mods().cl()
 }
 
 fn prepare_data(
@@ -760,9 +769,20 @@ fn compute_rbar(data: &RebirthData) -> Vec<f64> {
     smooth_on_corners(&data.base_corners, &r_step, 500.0, 0.001, false)
 }
 
-fn compute_density_and_keys(data: &RebirthData, key_usage: &[Vec<bool>]) -> (Vec<f64>, Vec<f64>) {
+fn compute_density_and_keys(
+    data: &RebirthData,
+    key_usage: &[Vec<bool>],
+) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let note_hit_times: Vec<_> = data.notes.iter().map(|note| note.head).collect();
+
+    // For the v2 (non-classic) path, long note tails count as additional
+    // hits, matching the reference implementation's `noteHitTimesV2`.
+    let mut note_hit_times_v2 = note_hit_times.clone();
+    note_hit_times_v2.extend(data.long_notes.iter().filter_map(|note| note.tail));
+    note_hit_times_v2.sort_by(f64::total_cmp);
+
     let mut density = vec![0.0; data.base_corners.len()];
+    let mut density_v2 = vec![0.0; data.base_corners.len()];
     let mut keys = vec![1.0; data.base_corners.len()];
 
     for (idx, &corner) in data.base_corners.iter().enumerate() {
@@ -770,13 +790,15 @@ fn compute_density_and_keys(data: &RebirthData, key_usage: &[Vec<bool>]) -> (Vec
         let high = corner + 500.0;
         density[idx] =
             (lower_bound(&note_hit_times, high) - lower_bound(&note_hit_times, low)) as f64;
+        density_v2[idx] =
+            (lower_bound(&note_hit_times_v2, high) - lower_bound(&note_hit_times_v2, low)) as f64;
         keys[idx] = key_usage.iter().filter(|column| column[idx]).count().max(1) as f64;
     }
 
-    (density, keys)
+    (density, density_v2, keys)
 }
 
-fn calculate_from_data(data: RebirthData) -> RebirthParams {
+fn calculate_from_data(data: RebirthData, classic: bool) -> RebirthParams {
     let key_usage = get_key_usage(&data);
     let active_columns: Vec<_> = (0..data.base_corners.len())
         .map(|idx| {
@@ -802,8 +824,9 @@ fn calculate_from_data(data: RebirthData) -> RebirthParams {
     );
     let rbar_base = compute_rbar(&data);
     let rbar = interp_values(&data.all_corners, &data.base_corners, &rbar_base);
-    let (density_base, keys_base) = compute_density_and_keys(&data, &key_usage);
+    let (density_base, density_v2_base, keys_base) = compute_density_and_keys(&data, &key_usage);
     let density = step_interp(&data.all_corners, &data.base_corners, &density_base);
+    let density_v2 = step_interp(&data.all_corners, &data.base_corners, &density_v2_base);
     let keys = step_interp(&data.all_corners, &data.base_corners, &keys_base);
 
     let d_all: Vec<_> = (0..data.all_corners.len())
@@ -836,7 +859,14 @@ fn calculate_from_data(data: RebirthData) -> RebirthParams {
         gaps[idx] = (data.all_corners[idx + 1] - data.all_corners[idx - 1]) / 2.0;
     }
 
-    let effective_weights: Vec<_> = density.iter().zip(gaps).map(|(&c, gap)| c * gap).collect();
+    // The D values always use the head-only density, but the effective
+    // weights select between the classic (head-only) and v2 (head + LN tail)
+    // densities, matching the reference implementation's `ContainsCL` branch.
+    let effective_weights: Vec<_> = if classic {
+        density.iter().zip(gaps).map(|(&c, gap)| c * gap).collect()
+    } else {
+        density_v2.iter().zip(gaps).map(|(&c, gap)| c * gap).collect()
+    };
     let mut sorted_indices: Vec<_> = (0..d_all.len()).collect();
     sorted_indices.sort_by(|&a, &b| d_all[a].total_cmp(&d_all[b]));
     let d_sorted: Vec<_> = sorted_indices.iter().map(|&idx| d_all[idx]).collect();
