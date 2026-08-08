@@ -164,17 +164,21 @@ impl Iterator for ManiaGradualDifficulty {
 
         self.idx += 1;
 
+        let params = super::rebirth::calculate_params_for_objects(
+            self.total_columns,
+            self.od,
+            self.clock_rate,
+            self.mania_objects.iter().take(self.idx).copied(),
+        );
+
         Some(ManiaDifficultyAttributes {
-            stars: super::rebirth::calculate_stars_for_objects(
-                self.total_columns,
-                self.od,
-                self.clock_rate,
-                self.mania_objects.iter().take(self.idx).copied(),
-            ),
+            stars: params.sr,
             max_combo: self.note_state.curr_combo,
             n_objects: self.idx as u32,
             n_hold_notes: self.note_state.n_hold_notes,
             is_convert: self.is_convert,
+            variety: params.variety,
+            acc_scalar: 0.5 * params.spikiness + 0.5 * params.switches,
         })
     }
 

@@ -15,6 +15,10 @@ pub struct ManiaDifficultyAttributes {
     ///
     /// [`Beatmap`]: crate::model::beatmap::Beatmap
     pub is_convert: bool,
+    /// The variety measure of the map, used for performance calculation.
+    pub variety: f64,
+    /// The accuracy scalar of the map, used for performance calculation.
+    pub acc_scalar: f64,
 }
 
 impl ManiaDifficultyAttributes {
@@ -35,6 +39,16 @@ impl ManiaDifficultyAttributes {
         self.is_convert
     }
 
+    /// Return the variety measure of the map.
+    pub const fn variety(&self) -> f64 {
+        self.variety
+    }
+
+    /// Return the accuracy scalar of the map.
+    pub const fn acc_scalar(&self) -> f64 {
+        self.acc_scalar
+    }
+
     /// Returns a builder for performance calculation.
     pub fn performance<'a>(self) -> ManiaPerformance<'a> {
         self.into()
@@ -50,6 +64,12 @@ pub struct ManiaPerformanceAttributes {
     pub pp: f64,
     /// The difficulty portion of the final pp.
     pub pp_difficulty: f64,
+    /// The variety multiplier applied to the difficulty portion.
+    pub variety_multiplier: f64,
+    /// The accuracy multiplier applied to the difficulty portion.
+    pub acc_multiplier: f64,
+    /// The length multiplier applied to the difficulty portion.
+    pub length_multiplier: f64,
 }
 
 impl ManiaPerformanceAttributes {
@@ -78,6 +98,21 @@ impl ManiaPerformanceAttributes {
     /// [`Beatmap`]: crate::model::beatmap::Beatmap
     pub const fn is_convert(&self) -> bool {
         self.difficulty.is_convert
+    }
+
+    /// Return the variety multiplier.
+    pub const fn variety_multiplier(&self) -> f64 {
+        self.variety_multiplier
+    }
+
+    /// Return the accuracy multiplier.
+    pub const fn acc_multiplier(&self) -> f64 {
+        self.acc_multiplier
+    }
+
+    /// Return the length multiplier.
+    pub const fn length_multiplier(&self) -> f64 {
+        self.length_multiplier
     }
 
     /// Returns a builder for performance calculation.

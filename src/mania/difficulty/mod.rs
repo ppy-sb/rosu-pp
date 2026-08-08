@@ -50,14 +50,16 @@ fn calculate_difficulty(difficulty: &Difficulty, map: &Beatmap) -> ManiaDifficul
     let n_objects = cmp::min(difficulty.get_passed_objects(), map.hit_objects.len()) as u32;
 
     let values = DifficultyValues::calculate(difficulty, map);
-    let stars = rebirth::calculate_stars(difficulty, map);
+    let params = rebirth::calculate_params(difficulty, map);
 
     ManiaDifficultyAttributes {
-        stars,
+        stars: params.sr,
         max_combo: values.max_combo,
         n_objects,
         n_hold_notes: values.n_hold_notes,
         is_convert: map.is_convert,
+        variety: params.variety,
+        acc_scalar: 0.5 * params.spikiness + 0.5 * params.switches,
     }
 }
 

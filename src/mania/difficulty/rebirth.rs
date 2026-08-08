@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 use crate::{
     Beatmap, Difficulty,
@@ -18,6 +19,17 @@ impl Note {
     fn tail_or_head(self) -> f64 {
         self.tail.unwrap_or(self.head)
     }
+}
+
+/// The result of the rebirth difficulty calculation, containing the star
+/// rating as well as the additional measures required for performance
+/// calculation.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct RebirthParams {
+    pub sr: f64,
+    pub spikiness: f64,
+    pub switches: f64,
+    pub variety: f64,
 }
 
 struct RebirthData {
@@ -118,6 +130,10 @@ impl LongNoteBodyRepresentation {
 }
 
 pub(super) fn calculate_stars(difficulty: &Difficulty, map: &Beatmap) -> f64 {
+    calculate_params(difficulty, map).sr
+}
+
+pub(super) fn calculate_params(difficulty: &Difficulty, map: &Beatmap) -> RebirthParams {
     let total_columns = map.cs.round_ties_even().max(1.0) as usize;
     let clock_rate = difficulty.get_clock_rate();
     let take = difficulty.get_passed_objects();
@@ -128,7 +144,7 @@ pub(super) fn calculate_stars(difficulty: &Difficulty, map: &Beatmap) -> f64 {
         .map(|h| ManiaObject::new(h, total_columns as f32, &mut params))
         .take(take);
 
-    calculate_stars_for_objects(total_columns, map.od, clock_rate, objects)
+    calculate_params_for_objects(total_columns, map.od, clock_rate, objects)
 }
 
 pub(super) fn calculate_stars_for_objects(
@@ -137,7 +153,20 @@ pub(super) fn calculate_stars_for_objects(
     clock_rate: f64,
     objects: impl IntoIterator<Item = ManiaObject>,
 ) -> f64 {
-    prepare_data(total_columns, od, clock_rate, objects).map_or(0.0, calculate_from_data)
+    calculate_params_for_objects(total_columns, od, clock_rate, objects).sr
+}
+
+pub(super) fn calculate_params_for_objects(
+    total_columns: usize,
+    od: f32,
+    clock_rate: f64,
+    objects: impl IntoIterator<Item = ManiaObject>,
+) -> RebirthParams {
+    let Some(data) = prepare_data(total_columns, od, clock_rate, objects) else {
+        return RebirthParams::default();
+    };
+
+    calculate_from_data(data)
 }
 
 fn prepare_data(
@@ -747,7 +776,7 @@ fn compute_density_and_keys(data: &RebirthData, key_usage: &[Vec<bool>]) -> (Vec
     (density, keys)
 }
 
-fn calculate_from_data(data: RebirthData) -> f64 {
+fn calculate_from_data(data: RebirthData) -> RebirthParams {
     let key_usage = get_key_usage(&data);
     let active_columns: Vec<_> = (0..data.base_corners.len())
         .map(|idx| {
@@ -796,7 +825,7 @@ fn calculate_from_data(data: RebirthData) -> f64 {
     let mut gaps = vec![0.0; data.all_corners.len()];
 
     if gaps.len() < 2 {
-        return 0.0;
+        return RebirthParams::default();
     }
 
     gaps[0] = (data.all_corners[1] - data.all_corners[0]) / 2.0;
@@ -818,7 +847,7 @@ fn calculate_from_data(data: RebirthData) -> f64 {
     let total_weight = w_sorted.iter().sum::<f64>();
 
     if total_weight <= 0.0 {
-        return 0.0;
+        return RebirthParams::default();
     }
 
     let target_percentiles = [0.945, 0.935, 0.925, 0.915, 0.845, 0.835, 0.825, 0.815];
@@ -860,7 +889,213 @@ fn calculate_from_data(data: RebirthData) -> f64 {
     sr = rescale_high(sr);
     sr *= 0.975;
 
-    sr
+    let spikiness = compute_spikiness(&d_sorted, &w_sorted, weighted_mean, total_weight);
+    let switches = compute_switches(&data, &keys, &d_all);
+    let variety = compute_variety(&data);
+
+    RebirthParams {
+        sr,
+        spikiness,
+        switches,
+        variety,
+    }
+}
+
+/// Spikiness measure from the weighted variance of the corner difficulty
+/// values, i.e. how much the difficulty spikes within the map.
+fn compute_spikiness(d_sorted: &[f64], w_sorted: &[f64], weighted_mean: f64, total_weight: f64) -> f64 {
+    // Degenerate cases where the reference implementation would produce NaN
+    if weighted_mean == 0.0 || total_weight <= 0.0 {
+        return 0.0;
+    }
+
+    let variance_sum_top = d_sorted
+        .iter()
+        .zip(w_sorted)
+        .map(|(&d, &w)| (d.powi(8) - weighted_mean.powi(8)).powi(2) * w)
+        .sum::<f64>();
+
+    let weighted_variance = (variance_sum_top / total_weight).powf(1.0 / 8.0);
+
+    weighted_variance.sqrt() / weighted_mean
+}
+
+/// Switch measure, i.e. how much the playstyle switches between jack and
+/// stream-like patterns. Values are in the range `[0.5, 1.5]`.
+fn compute_switches(data: &RebirthData, ks_arr: &[f64], d_all: &[f64]) -> f64 {
+    let all_corners = &data.all_corners;
+
+    // Heads of all notes, in (head, column) order
+    let heads: Vec<f64> = data.notes.iter().map(|note| note.head).collect();
+
+    // For each head, the index of the first corner >= head (last index dropped)
+    let idx_list: Vec<usize> = heads.iter().map(|&head| lower_bound(all_corners, head)).collect();
+    let n = idx_list.len().saturating_sub(1);
+
+    let ks_at_note: Vec<f64> = idx_list[..n].iter().map(|&i| ks_arr[i]).collect();
+    let weights_at_note: Vec<f64> = idx_list[..n].iter().map(|&i| d_all[i]).collect();
+
+    let head_gaps: Vec<f64> = heads.windows(2).map(|w| w[1] - w[0]).collect();
+    let num_head_gaps = head_gaps.len();
+
+    // Moving averages over a window of 101 gaps
+    let avgs: Vec<f64> = (0..num_head_gaps)
+        .map(|i| {
+            let start = i.saturating_sub(50);
+            let end = (i + 50).min(num_head_gaps - 1);
+
+            head_gaps[start..=end].iter().sum::<f64>() / (end - start + 1) as f64
+        })
+        .collect();
+
+    let mut signature_head = 0.0;
+    let mut sum_ref_head = 0.0;
+
+    for i in 0..num_head_gaps {
+        let avg = avgs[i];
+
+        // Skip degenerate windows where all gaps are zero
+        if avg == 0.0 {
+            continue;
+        }
+
+        let ratio = head_gaps[i] / avg / num_head_gaps as f64;
+        signature_head += (ratio * weights_at_note[i]).sqrt() * ks_at_note[i].powf(0.25);
+        sum_ref_head += (head_gaps[i] / avg) * weights_at_note[i];
+    }
+
+    let ref_signature_head = sum_ref_head.sqrt();
+
+    // Tails of long notes, sorted by tail time
+    let tails: Vec<f64> = data.tails.iter().map(|note| note.tail_or_head()).collect();
+
+    let mut signature_tail = 0.0;
+    let mut ref_signature_tail = 0.0;
+    let mut num_tail_gaps = 0;
+
+    if tails.len() > 1 && tails[tails.len() - 1] > tails[0] {
+        let idx_list_tails: Vec<usize> =
+            tails.iter().map(|&tail| lower_bound(all_corners, tail)).collect();
+        let n_tails = idx_list_tails.len() - 1;
+
+        let ks_at_tail: Vec<f64> = idx_list_tails[..n_tails].iter().map(|&i| ks_arr[i]).collect();
+        let weights_at_tail: Vec<f64> = idx_list_tails[..n_tails].iter().map(|&i| d_all[i]).collect();
+
+        let tail_gaps: Vec<f64> = tails.windows(2).map(|w| w[1] - w[0]).collect();
+        let num_tail_gaps_tmp = tail_gaps.len();
+
+        if num_tail_gaps_tmp > 0 {
+            let avgs_tail: Vec<f64> = (0..num_tail_gaps_tmp)
+                .map(|i| {
+                    let start = i.saturating_sub(50);
+                    let end = (i + 50).min(num_tail_gaps_tmp - 1);
+
+                    tail_gaps[start..=end].iter().sum::<f64>() / (end - start + 1) as f64
+                })
+                .collect();
+
+            for i in 0..num_tail_gaps_tmp {
+                let avg = avgs_tail[i];
+
+                // Skip degenerate windows where all gaps are zero
+                if avg == 0.0 {
+                    continue;
+                }
+
+                let ratio = tail_gaps[i] / avg / num_tail_gaps_tmp as f64;
+                signature_tail += (ratio * weights_at_tail[i]).sqrt() * ks_at_tail[i].powf(0.25);
+                ref_signature_tail += (tail_gaps[i] / avg) * weights_at_tail[i];
+            }
+
+            ref_signature_tail = ref_signature_tail.sqrt();
+            num_tail_gaps = num_tail_gaps_tmp;
+        }
+    }
+
+    let numerator = signature_head * num_head_gaps as f64 + signature_tail * num_tail_gaps as f64;
+    let denominator =
+        ref_signature_head * num_head_gaps as f64 + ref_signature_tail * num_tail_gaps as f64;
+
+    // Degenerate case where the reference implementation would produce NaN
+    if denominator == 0.0 {
+        return 0.5;
+    }
+
+    numerator / denominator / 2.0 + 0.5
+}
+
+/// Variety measure based on the Rao quadratic entropy of the head, tail and
+/// per-column head gaps.
+fn compute_variety(data: &RebirthData) -> f64 {
+    let head_gaps: Vec<i64> = data
+        .notes
+        .windows(2)
+        .map(|w| w[1].head as i64 - w[0].head as i64)
+        .collect();
+
+    // All notes sorted by their tail time, circles have a tail of -1
+    let mut tail_notes: Vec<&Note> = data.notes.iter().collect();
+    tail_notes.sort_by_key(|note| tail_value(note));
+
+    let tail_gaps: Vec<i64> = tail_notes
+        .windows(2)
+        .map(|w| tail_value(w[1]) - tail_value(w[0]))
+        .collect();
+
+    let head_variety = rao_quadratic_entropy_log(&head_gaps, 1);
+    let tail_variety = rao_quadratic_entropy_log(&tail_gaps, 1);
+
+    let mut head_gaps_new = Vec::new();
+
+    for column in &data.notes_by_column {
+        head_gaps_new.extend(column.windows(2).map(|w| w[1].head as i64 - w[0].head as i64));
+    }
+
+    let col_variety = 2.5 * rao_quadratic_entropy_log(&head_gaps_new, 2);
+
+    0.5 * head_variety + 0.11 * tail_variety + 0.45 * col_variety
+}
+
+fn tail_value(note: &Note) -> i64 {
+    note.tail.map_or(-1, |tail| tail as i64)
+}
+
+/// Rao's quadratic entropy on the values treated as categories, applying
+/// `log_iterations` times the log(1 + |x - y|) distance.
+fn rao_quadratic_entropy_log(values: &[i64], log_iterations: u32) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+
+    let mut counts = HashMap::new();
+
+    for &value in values {
+        *counts.entry(value).or_insert(0usize) += 1;
+    }
+
+    // Iterate in a deterministic order to avoid floating point differences
+    // based on the HashMap's randomized iteration order.
+    let mut uniques: Vec<i64> = counts.keys().copied().collect();
+    uniques.sort_unstable();
+
+    let total = values.len() as f64;
+    let mut q = 0.0;
+
+    for &x in &uniques {
+        let p_x = counts[&x] as f64 / total;
+
+        for &y in &uniques {
+            let mut dist = (x - y).abs() as f64;
+
+            for _ in 0..log_iterations {
+                dist = (1.0 + dist).ln();
+            }
+
+            q += p_x * (counts[&y] as f64 / total) * dist;
+        }
+    }
+
+    q
 }
 
 fn notes_in_pair(data: &RebirthData, pair_column: usize) -> Vec<Note> {
@@ -997,5 +1232,21 @@ mod tests {
     fn long_note_body_sum_is_zero_without_long_notes() {
         let rep = LongNoteBodyRepresentation::new(&[], 1000.0);
         assert_eq!(rep.sum(100.0, 900.0), 0.0);
+    }
+
+    #[test]
+    fn rao_entropy_log_matches_reference() {
+        // Rao quadratic entropy of [1, 2, 3] with one log iteration:
+        // (4 * ln 2 + 2 * ln 3) / 9
+        let q = rao_quadratic_entropy_log(&[1, 2, 3], 1);
+        let expected = (4.0 * 2.0_f64.ln() + 2.0 * 3.0_f64.ln()) / 9.0;
+
+        assert!((q - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn rao_entropy_log_empty_and_single_value() {
+        assert_eq!(rao_quadratic_entropy_log(&[], 1), 0.0);
+        assert_eq!(rao_quadratic_entropy_log(&[42], 2), 0.0);
     }
 }
