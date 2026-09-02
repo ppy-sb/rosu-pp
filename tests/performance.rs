@@ -400,6 +400,7 @@ impl AssertEq for ManiaPerformanceAttributes {
             difficulty: _,
             pp,
             pp_difficulty,
+            ..
         } = self;
 
         assert_eq_float(*pp_difficulty, expected.pp_difficulty);
