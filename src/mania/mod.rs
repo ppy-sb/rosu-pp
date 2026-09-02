@@ -15,6 +15,11 @@ pub use self::{
     performance::{InspectManiaPerformance, ManiaPerformance, gradual::ManiaGradualPerformance},
     score_state::{ManiaHitResults, ManiaScoreState},
     strains::ManiaStrains,
+    sunny::{
+        InputClass, InputStateBin, NoteDifficultyBin, SunnyManiaDifficultyAttributes,
+        SunnyManiaPerformanceAttributes, SunnyScoreState, INPUT_CLASSES, INPUT_STATE_BINS,
+        LN_DURATION_EDGES, LN_DURATION_REPRESENTATIVES, NOTE_DIFFICULTY_BINS,
+    },
 };
 
 mod attributes;
@@ -24,6 +29,9 @@ mod object;
 mod performance;
 mod score_state;
 mod strains;
+pub mod sunny;
+pub mod sunny_accuracy;
+pub mod sunny_windows;
 
 /// Marker type for [`GameMode::Mania`].
 ///

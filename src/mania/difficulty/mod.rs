@@ -50,16 +50,32 @@ fn calculate_difficulty(difficulty: &Difficulty, map: &Beatmap) -> ManiaDifficul
     let n_objects = cmp::min(difficulty.get_passed_objects(), map.hit_objects.len()) as u32;
 
     let values = DifficultyValues::calculate(difficulty, map);
-    let params = rebirth::calculate_params(difficulty, map);
+    let sunny = super::sunny::calculate(
+        map,
+        &match difficulty.get_mods() {
+            crate::model::mods::GameMods::Lazer(mods) => rosu_mods::GameMods::from(mods.clone()),
+            crate::model::mods::GameMods::Intermode(mods) => {
+                rosu_mods::GameMods::from_intermode(mods, rosu_mods::GameMode::Mania)
+            }
+            crate::model::mods::GameMods::Legacy(mods) => {
+                rosu_mods::GameModsIntermode::from(mods.clone())
+                    .with_mode(rosu_mods::GameMode::Mania)
+            }
+        },
+        difficulty.get_clock_rate(),
+        Some(difficulty.get_lazer()),
+        Some(n_objects),
+    );
+    let params = sunny.unwrap_or_default();
 
     ManiaDifficultyAttributes {
-        stars: params.sr,
+        stars: params.stars,
         max_combo: values.max_combo,
         n_objects,
         n_hold_notes: values.n_hold_notes,
         is_convert: map.is_convert,
         variety: params.variety,
-        acc_scalar: 0.5 * params.spikiness + 0.5 * params.switches,
+        acc_scalar: params.acc_scalar,
     }
 }
 
