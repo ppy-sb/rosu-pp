@@ -778,6 +778,19 @@ fn ez_is_priced_by_the_windows_not_a_multiplier() {
     let perf_nm = calculate_performance(&nm, &nm_mods, state);
     let perf_ez = calculate_performance(&ez, &ez_mods, state);
 
+    println!(
+        "surface A/B: NM pattern={:.6} timing={:.6} pp={:.6} scalar={:.6}; \
+EZ pattern={:.6} timing={:.6} pp={:.6} scalar={:.6}",
+        perf_nm.pp_pattern,
+        perf_nm.pp_timing,
+        perf_nm.pp,
+        perf_nm.window_scalar,
+        perf_ez.pp_pattern,
+        perf_ez.pp_timing,
+        perf_ez.pp,
+        perf_ez.window_scalar
+    );
+
     assert!(
         perf_ez.window_scalar < 1.0,
         "wider windows should discount the score, got {}",
@@ -4187,6 +4200,49 @@ fn multiuser_report() {
         "\nsurface pp multiplier: geometric mean {mean_surface_multiplier:.4} ({:+.2}%)",
         (mean_surface_multiplier - 1.0) * 100.0
     );
+
+    // Keep the surface-transfer baseline explicit for the cohorts used when
+    // deciding whether to strengthen its contribution to PP. These are all
+    // non-EZ so window widening cannot be mistaken for ordinary surface motion.
+    println!("\nnon-EZ surface-transfer distributions:");
+    println!("  {:<24} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8}",
+        "cohort", "n", "mean", "geo", "p10", "median", "p90");
+    let print_surface_cohort = |label: &str, rows: Vec<&MultiPriced>| {
+        let mut values: Vec<f64> = rows
+            .into_iter()
+            .filter(|r| !r.row.mods.contains("EZ"))
+            .map(|r| r.surface_multiplier.max(f64::MIN_POSITIVE))
+            .collect();
+        if values.is_empty() {
+            println!("  {label:<24} {:>5} (empty)", 0);
+            return;
+        }
+        values.sort_by(f64::total_cmp);
+        let n = values.len();
+        let mean = values.iter().sum::<f64>() / n as f64;
+        let geo = values.iter().map(|v| v.ln()).sum::<f64>().div_euclid(n as f64).exp();
+        let quantile = |p: f64| values[((n - 1) as f64 * p).round() as usize];
+        println!("  {label:<24} {n:>5} {mean:>8.4} {geo:>8.4} {:>8.4} {:>8.4} {:>8.4}",
+            quantile(0.10), quantile(0.50), quantile(0.90));
+    };
+    print_surface_cohort("all non-EZ", all.iter().copied().collect());
+    print_surface_cohort("4K rice LN<30%", all.iter().copied()
+        .filter(|r| r.row.keys == 4 && r.ln_fraction < 0.30).collect());
+    print_surface_cohort("4K LN>=30%", all.iter().copied()
+        .filter(|r| r.row.keys == 4 && r.ln_fraction >= 0.30).collect());
+    print_surface_cohort("low-OD 7K LN>30%", all.iter().copied()
+        .filter(|r| r.row.keys == 7 && r.od < 6.0 && r.ln_fraction > 0.30).collect());
+    print_surface_cohort("all rice LN<5%", all.iter().copied()
+        .filter(|r| r.ln_fraction < 0.05).collect());
+
+    println!("\nrice surface transfer by accuracy (non-EZ, LN<5%):");
+    for (label, lo, hi) in [("<95%", 0.0, 95.0), ("95-98%", 95.0, 98.0), (">=98%", 98.0, 101.0)] {
+        let rows: Vec<&MultiPriced> = all.iter().copied().filter(|r| {
+            r.ln_fraction < 0.05 && !r.row.mods.contains("EZ")
+                && r.row.acc >= lo && r.row.acc < hi
+        }).collect();
+        print_surface_cohort(label, rows);
+    }
 
     println!("surface-transfer sensitivity (relative to each exponent's cohort mean):");
     println!(
