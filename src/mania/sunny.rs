@@ -2377,28 +2377,12 @@ fn compute_density_and_keys(
 /// The floor can only ever raise the factor, never lower it, so it can only raise stars;
 /// `0.0` would be bit-for-bit identical to the unclamped `35.0 / (density + 8.0)` baseline.
 ///
-/// `1.5` is the shipped value, chosen from a sweep over `0.8` / `1.0` / `1.2` / `1.5` /
-/// `2.0` on the 405-map fixture set as the point where the long-note cohorts gain a few
-/// percent while rice does not move at all and the hardest map in the set moves 10.757 ->
-/// 10.765. It is an empirical choice, not a derived one, and the honest account of what it
-/// does and does not act on is in `release_density_weight`'s doc comment. Changing it means
-/// updating `release_density_weight_ships_a_raised_floor`'s table.
+/// The previous value (`1.5`) was an empirical broad amplification of LN maps.  The
+/// parameter-ablation audit showed that it materially raises short and dense LN charts while
+/// leaving rice unchanged, so the shipped default is now `0.0`: the continuous density
+/// response is used without a duration-independent amplification floor.
 ///
-/// Median % stars change vs the unclamped baseline, by long-note share of objects:
-///
-/// | floor | rice | 0-30% | 30-60% | >60% | maps moved |
-/// | --- | --- | --- | --- | --- | --- |
-/// | 0.8 | +0.000 | +0.000 | +0.000 | +0.003 | 120 |
-/// | 1.0 | +0.000 | +0.000 | +0.119 | +0.294 | 192 |
-/// | 1.2 | +0.000 | +0.007 | +0.931 | +1.164 | 275 |
-/// | 1.5 | +0.000 | +0.156 | +2.365 | +2.629 | 332 |
-/// | 2.0 | +0.000 | +0.869 | +4.678 | +5.279 | 347 |
-///
-/// Within 7K alone the gain is monotone in long-note share (0% -> +0.000%, 2-11% ->
-/// +0.515%, 12-31% -> +0.762%, 32-58% -> +2.452%, 98%+ -> +3.287%), which is the shape the
-/// change is for: it prices long-note charts up in proportion to how much of the chart is
-/// long notes, and leaves rice alone.
-const RELEASE_WEIGHT_FLOOR: f64 = 1.5;
+const RELEASE_WEIGHT_FLOOR: f64 = 0.0;
 
 /// Cap on [`release_density_weight`]'s output.
 ///
@@ -2425,9 +2409,9 @@ const RELEASE_WEIGHT_CAP: f64 = f64::INFINITY;
 /// judgement window, see `compute_rbar`'s `COLLISION_WEIGHT`) and most discarded by this
 /// divisor.
 ///
-/// The shipped floor of `1.5` bounds that suppression, but **not in the way the framing
-/// above would suggest**, and the difference is worth writing down because it constrains
-/// what a future fix here can be.
+/// A raised floor previously bounded that suppression, but **not in the way the framing
+/// above would suggest**. The shipped configuration now leaves the response continuous,
+/// avoiding that broad amplification across the mid-density band.
 ///
 /// The factor crosses 1.0 at density 27, so a floor of `0.8` acts *only* on density > 35.75
 /// — the genuinely suppressed corners. Swept over the fixture set, floor `0.8` moves the
@@ -2449,7 +2433,7 @@ const RELEASE_WEIGHT_CAP: f64 = f64::INFINITY;
 /// is wrong, it is wrong in its whole form across the mid-density band, and replacing the
 /// form is the change to make rather than clamping it harder.
 ///
-/// Default floor/cap make this bit-for-bit identical to the unclamped baseline; see
+/// With the default floor/cap this is bit-for-bit identical to the unclamped baseline; see
 /// `release_density_weight_default_is_identity`.
 fn release_density_weight(density: f64) -> f64 {
     (35.0 / (density + 8.0)).clamp(RELEASE_WEIGHT_FLOOR, RELEASE_WEIGHT_CAP)
