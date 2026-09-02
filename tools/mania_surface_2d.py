@@ -24,7 +24,7 @@ Usage
     tools/mania_surface_2d.py --map path/to.osu --out /tmp/surface.png
 
 Requires `matplotlib` and `numpy`. Data comes from the `surface_dump` test in
-`src/sunny.rs`, which this script invokes via `cargo test`.
+`src/mania/sunny/tests.rs`, which this script invokes via `cargo test`.
 """
 
 from __future__ import annotations

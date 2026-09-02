@@ -30,7 +30,7 @@ Requires `plotly` and `numpy`. If they are missing:
     uv venv .venv && uv pip install --python .venv/bin/python plotly numpy
     .venv/bin/python tools/mania_surface.py
 
-The data comes from the `od_surface_dump` test in `src/sunny.rs`, which this script
+The data comes from the `od_surface_dump` test in `src/mania/sunny/tests.rs`, which this script
 invokes via `cargo test`. Keep the CSV columns in sync with it.
 """
 

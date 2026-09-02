@@ -5,7 +5,7 @@ export plus locally-computed sunny stars, with no MySQL dependency.
 Use this instead of build_multiuser_tsv.py when the local docker-mysql
 mirror is a stale backup that predates the users/scores/maps you need (it
 can't supply mods/stars/username for rows it doesn't have). The star rating
-here is computed by tools/compute_stars.mjs rather than trusted from the
+here is computed by the ignored Rust `fixture_stars` test rather than trusted from the
 `maps` table, since bancho.py's stored `diff` is a different (and often
 stale) calculation from sunny's own.
 

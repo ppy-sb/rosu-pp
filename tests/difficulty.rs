@@ -144,6 +144,8 @@ macro_rules! test_cases {
             n_hold_notes: $n_hold_notes,
             max_combo: $max_combo,
             is_convert: $is_convert,
+            variety: 0.0,
+            acc_scalar: 0.0,
         }
     }
 }
@@ -666,6 +668,7 @@ impl AssertEq for TaikoDifficultyAttributes {
             stars,
             max_combo,
             is_convert,
+            ..
         } = self;
 
         assert_eq_float(*stamina, expected.stamina);
@@ -692,6 +695,7 @@ impl AssertEq for CatchDifficultyAttributes {
             n_droplets,
             n_tiny_droplets,
             is_convert,
+            ..
         } = self;
 
         assert_eq_float(*stars, expected.stars);
@@ -711,6 +715,7 @@ impl AssertEq for ManiaDifficultyAttributes {
             n_hold_notes,
             max_combo,
             is_convert,
+            ..
         } = self;
 
         assert_eq_float(*stars, expected.stars);

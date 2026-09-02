@@ -1,8 +1,53 @@
 # tools
 
 Visualisers and measurement harnesses for the osu!mania accuracy surface. None are part
-of the build. The visualisers read CSVs produced by `#[ignore]`d tests in `src/sunny.rs`
+of the build. The visualisers read CSVs produced by `#[ignore]`d tests under
+`src/mania/sunny/`
 and write into `target/surface/`, which is gitignored.
+
+## Language boundary
+
+The calculation-heavy research code belongs in Rust test modules next to Sunny. It can
+use private model details, shares the crate's exact implementation, and is compiled only
+by `cargo test`; it is not a shipped tool binary. Expensive report entry points remain
+ignored tests. Python remains appropriate for Plotly/matplotlib rendering and small file
+transformations, while shell remains appropriate for fetching fixtures.
+
+Current ownership:
+
+- `src/mania/sunny/tests/replay.rs`: LZMA replay decoding, frame transitions,
+  per-column pairing, stable hit windows, LN judgement reconstruction, and parallel
+  batch verification. This is the main performance-sensitive pipeline.
+- `src/mania/sunny/tests/recovery.rs`: parallel deterministic recovery-curve fitting.
+- `tools/mania_surface*.py` and `tools/diag_*.py`: presentation and exploratory plots;
+  keep these in Python.
+- `tools/fetch_*.sh`: external data acquisition; keep these as shell.
+- `tools/parse_replay.py` and `tools/input_state.py`: retained temporarily for their JSON
+  exports and the full input-state table. New pairing or fitting logic must go into the
+  Rust modules, not these copies.
+- `tools/build_*.py`: low-volume fixture format conversion. These are I/O-bound and do
+  not justify a Rust rewrite unless their schemas become authoritative library types.
+- The removed `compute_stars.mjs` is superseded by the `fixture_stars` ignored Rust test;
+  unlike plotting, it duplicated model execution through an external vendored WASM build.
+
+Run replay verification directly through the ignored Rust harness:
+
+```sh
+SUNNY_REPLAY_BATCH=local-fixtures/cohorts/4211-2021Q4.tsv \
+  cargo test --release replay_report -- --ignored --nocapture
+```
+
+The batch may live directly under `local-fixtures/` or in `local-fixtures/cohorts/`;
+both resolve the shared `maps/` and `replays/` directories.
+
+Compute the mod-aware star fixture that `compute_stars.mjs` previously produced:
+
+```sh
+SUNNY_STAR_PAIRS=local-fixtures/star-pairs.tsv \
+  cargo test --release fixture_stars -- --ignored --nocapture
+```
+
+Set `SUNNY_MAPS` only when the beatmaps are not under `local-fixtures/maps/`.
 
 ## Fixture fetchers
 
@@ -20,8 +65,8 @@ build) and need the bancho.py MySQL container reachable.
 - `build_full_osr.py` / `build_multiuser_tsv.py` — rebuild replays/`multiuser.tsv` from
   bancho.py's on-disk partial replay blob + a row read via `docker exec` MySQL. Only
   correct when the local docker-mysql mirror actually has the rows you need.
-- `build_osr_from_csv.py` / `build_multiuser_from_csv.py` / `compute_stars.mjs` — the
-  MySQL-free versions of the two above. Use these when the local mirror is a stale
+- `build_osr_from_csv.py` / `build_multiuser_from_csv.py` / the Rust `fixture_stars`
+  report — the MySQL-free versions of the two above. Use these when the local mirror is a stale
   backup (it will silently miss recent users/scores/maps rather than error). They take
   a raw CSV export (scoreid, bid, score, pp, acc, max_combo, n300, n100, n50, nmiss,
   ngeki, nkatu, grade, play_time, userid, username, bid, key_count, od, stars, mods) —
@@ -64,7 +109,8 @@ scores over 1940 players; 528 EZ scores over 118 players.
 ```sh
 tools/fetch_ladder.sh 30                            # 4 default cohorts x 30 scores
 tools/fetch_ladder.sh 30 4616:2023:3                # userid:year:quarter
-tools/parse_replay.py --batch local-fixtures/ladder.tsv --json local-fixtures/ladder-errors.json
+SUNNY_REPLAY_BATCH=local-fixtures/ladder.tsv \
+  cargo test --release replay_report -- --ignored --nocapture
 ```
 
 `fetch_ladder.sh` always writes `local-fixtures/ladder.tsv`, so **fetching a second
@@ -77,11 +123,11 @@ which makes it the wrong set for anything about the clean end of the surface: se
 `ErrorModel::sigma_floor`, where a replay-measured floor turned out to be contradicted by
 the judgement counts of near-perfect scores the ladder never sampled.
 
-`parse_replay.py` turns `.osr` replays into per-note hit errors, which measures a
+The Rust replay harness turns `.osr` replays into per-note hit errors, which measures a
 player's timing sigma directly instead of inferring it from judgement counts. Its
-`--verify` mode recomputes judgements and diffs them against the server's stored counts;
-that is the correctness check on the whole pipeline. See the module docstring, which
-records which pairing rules were tested and rejected.
+report recomputes judgements and diffs them against the server's stored counts; that is
+the correctness check on the whole pipeline. `tools/parse_replay.py` remains only while
+the input-state JSON export is migrated.
 
 Fit against sunny's own star ratings, not bancho's stored `maps.diff` — the two are
 different calculations (`log`-`log` slope 0.78), and an exponent is only meaningful in
