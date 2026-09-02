@@ -2497,6 +2497,47 @@ fn surface_dump() {
     )
     .unwrap();
 
+    if let Some((_, _, attrs)) = map_slice.as_ref() {
+        if let Some(bins) = attrs.input_state_bins {
+            let mut csv = String::from("class,bin,count,mean_difficulty,mean_duration_ms,mean_gap_ms,mean_chord_width,mean_other_held\n");
+            for (idx, bin) in bins.iter().enumerate() {
+                if bin.count == 0 { continue; }
+                writeln!(csv, "{:?},{},{},{},{},{},{},{}", bin.class, idx % crate::mania::sunny::NOTE_DIFFICULTY_BINS, bin.count, bin.mean_difficulty, bin.mean_duration_ms, bin.mean_gap_ms, bin.mean_chord_width, bin.mean_other_held).unwrap();
+            }
+            std::fs::write(dir.join("input_state_bins.csv"), csv).unwrap();
+        }
+    }
+    if let Some((_, map, _)) = map_slice.as_ref() {
+        if let Some((_, _, per_note)) = per_note_difficulty(map) {
+            let mut csv = String::from("time_ms,note_index,difficulty,hold_duration_ms\n");
+            for (idx, ((difficulty, duration), object)) in per_note.iter().zip(&map.hit_objects).enumerate() {
+                writeln!(csv, "{},{},{},{}", object.start_time, idx, difficulty, duration.unwrap_or(0.0)).unwrap();
+            }
+            std::fs::write(dir.join("per_note_difficulty.csv"), csv).unwrap();
+
+            if let Some((_, _, attrs)) = map_slice.as_ref() {
+                let model = ErrorModel::default();
+                let skill = attrs.stars.max(0.001);
+                let mut csv = String::from("time_ms,note_index,variant,difficulty,miss,p50,p100,p200,p300,p320,custom_accuracy,acc_d\n");
+                for (idx, ((difficulty, duration), object)) in per_note.iter().zip(&map.hit_objects).enumerate() {
+                    for variant in ["baseline", "ln_as_rice"] {
+                        let unit = if variant == "baseline" {
+                            duration.map_or_else(|| JudgementUnit::new(*difficulty), |duration| JudgementUnit::long_note(*difficulty, 1.0, &model, duration))
+                        } else {
+                            JudgementUnit::new(*difficulty)
+                        };
+                        let counts = expected_counts(&[unit], &attrs.hit_windows, &model, skill);
+                        let p = counts.as_array();
+                        let accuracy = counts.custom_accuracy();
+                        let acc_d = difficulty * (1.0 - accuracy);
+                        writeln!(csv, "{},{},{},{},{},{},{},{},{},{},{},{}", object.start_time, idx, variant, difficulty, p[5], p[4], p[3], p[2], p[1], p[0], accuracy, acc_d).unwrap();
+                    }
+                }
+                std::fs::write(dir.join("per_note_expected_counts.csv"), csv).unwrap();
+            }
+        }
+    }
+
     let mut bands = String::from("skill,sigma,n320,n300,n200,n100,n50,miss,accuracy\n");
 
     for &skill in &skills {

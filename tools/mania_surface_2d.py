@@ -34,6 +34,8 @@ import csv
 import os
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from collections import defaultdict
 from pathlib import Path
 
@@ -89,8 +91,13 @@ def dump(args: argparse.Namespace) -> None:
     # `--exact`: the bare name also substring-matches `od_surface_dump`, which would
     # clobber that tool's CSV with a default-parameter dump as a side effect.
     command = [
-        "cargo", "test", "sunny::tests::surface_dump",
-        "--", "--ignored", "--exact", "--nocapture",
+        "cargo",
+        "test",
+        "mania::sunny::tests::surface_dump",
+        "--",
+        "--ignored",
+        "--exact",
+        "--nocapture",
     ]
     print("$", " ".join(command))
     env = dict(os.environ)
@@ -101,6 +108,29 @@ def dump(args: argparse.Namespace) -> None:
 
     if result.returncode != 0:
         sys.exit(f"cargo test failed with status {result.returncode}")
+
+
+def fetch_map(path: Path) -> Path:
+    """Fetch a beatmap ID into the repository's local fixture map directory."""
+    map_id = path.stem if path.suffix else path.name
+    if not map_id.isdigit():
+        sys.exit(f"--fetch requires a numeric beatmap ID or path, got {path}")
+
+    destination = ROOT / "local-fixtures" / "maps" / f"{map_id}.osu"
+    if destination.exists():
+        return destination
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    url = f"https://osu.ppy.sh/osu/{map_id}"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            destination.write_bytes(response.read())
+    except (urllib.error.URLError, OSError) as error:
+        destination.unlink(missing_ok=True)
+        sys.exit(f"failed to fetch beatmap {map_id} from {url}: {error}")
+
+    print(f"fetched beatmap {map_id} -> {destination}")
+    return destination
 
 
 def style(ax, title: str, xlabel: str, ylabel: str) -> None:
@@ -165,8 +195,7 @@ SKILL_TICKS = [0.5, 1, 2, 5, 10, 20, 40]
 def panel_shortfall(figure, ax, acc, diffs, skills, X, Y) -> None:
     style(
         ax,
-        "accuracy shortfall (1 - acc) over (difficulty, skill)\n"
-        "at reference windows (OD8 classic)",
+        "accuracy shortfall (1 - acc) over (difficulty, skill)\n" "at reference windows (OD8 classic)",
         "map difficulty (stars)",
         "player skill (star units)",
     )
@@ -174,13 +203,15 @@ def panel_shortfall(figure, ax, acc, diffs, skills, X, Y) -> None:
     # Accuracy itself is flat over most of the plane; the shortfall on a log scale is
     # where the structure lives.
     shortfall = np.clip(1.0 - acc, 1e-6, 1.0)
-    filled = ax.contourf(
-        X, Y, np.log10(shortfall), levels=np.linspace(-6, 0, 25), cmap="magma"
-    )
+    filled = ax.contourf(X, Y, np.log10(shortfall), levels=np.linspace(-6, 0, 25), cmap="magma")
     lines = ax.contour(
-        X, Y, acc,
+        X,
+        Y,
+        acc,
         levels=[0.50, 0.80, 0.90, 0.95, 0.99, 0.999],
-        colors="#8fe3ff", linewidths=0.9, alpha=0.9,
+        colors="#8fe3ff",
+        linewidths=0.9,
+        alpha=0.9,
     )
     ax.clabel(lines, fmt=lambda v: f"{v * 100:g}%", fontsize=8, colors="#cfefff")
 
@@ -189,10 +220,16 @@ def panel_shortfall(figure, ax, acc, diffs, skills, X, Y) -> None:
     plain_log(ax, "x", DIFF_TICKS)
     plain_log(ax, "y", SKILL_TICKS)
 
-    ax.plot(diffs, diffs, color="#ffffff", ls="--", lw=1.0, alpha=0.5,
-            label="skill = difficulty")
-    ax.plot(diffs, [3.7 * d for d in diffs], color="#ff9f6b", ls=":", lw=1.2,
-            alpha=0.85, label="saturation (3.7x)")
+    ax.plot(diffs, diffs, color="#ffffff", ls="--", lw=1.0, alpha=0.5, label="skill = difficulty")
+    ax.plot(
+        diffs,
+        [3.7 * d for d in diffs],
+        color="#ff9f6b",
+        ls=":",
+        lw=1.2,
+        alpha=0.85,
+        label="saturation (3.7x)",
+    )
     ax.set_ylim(min(skills), max(skills))
     legend(ax, loc="lower right")
     colorbar(figure, filled, ax, "log10 (1 - accuracy)")
@@ -259,8 +296,13 @@ def panel_windows(ax, target: float | None) -> None:
     )
 
     for label, (xs, ys) in series.items():
-        ax.plot(xs, ys, lw=1.8, color=WINDOW_COLORS.get(label, "#aaaaaa"),
-                label=f"{label}  (great {greats[label]:.1f} ms)")
+        ax.plot(
+            xs,
+            ys,
+            lw=1.8,
+            color=WINDOW_COLORS.get(label, "#aaaaaa"),
+            label=f"{label}  (great {greats[label]:.1f} ms)",
+        )
 
     ax.set_xscale("log")
     ax.set_xlim(1, 60)
@@ -271,25 +313,165 @@ def panel_windows(ax, target: float | None) -> None:
     # A horizontal read at one accuracy is exactly what `window_scalar` computes.
     if target:
         ax.axhline(target, color="#ffd166", ls="--", lw=1.0, alpha=0.7)
-        ax.annotate(f"{target * 100:.2f}%", (1.15, target + 0.008),
-                    color="#ffd166", fontsize=8)
+        ax.annotate(f"{target * 100:.2f}%", (1.15, target + 0.008), color="#ffd166", fontsize=8)
+
+
+def panel_input_state(ax) -> None:
+    expected_path = DATA / "per_note_expected_counts.csv"
+    if expected_path.exists():
+        rows = read("per_note_expected_counts.csv")
+        base = [r for r in rows if r["variant"] == "baseline"]
+        t = np.array([float(r["time_ms"]) / 1000.0 for r in base])
+        colors = {
+            "miss": "#ef476f",
+            "p50": "#ff9f6b",
+            "p100": "#c39bff",
+            "p200": "#7cffb2",
+            "p300": "#8fe3ff",
+            "p320": "#ffd166",
+        }
+        bottom = np.zeros(len(base))
+        for key in ("miss", "p50", "p100", "p200", "p300", "p320"):
+            values = np.array([float(r[key]) * float(r["difficulty"]) for r in base])
+            ax.fill_between(t, bottom, bottom + values, step="mid", color=colors[key], alpha=0.78, label=key)
+            bottom += values
+        ax.plot(t, bottom, color="#f4f7fa", lw=0.7, alpha=0.6)
+        style(
+            ax,
+            "Sunny d-weighted expected hit-result composition",
+            "map time (s)",
+            "d × expected judgement share",
+        )
+        ax.set_xlabel("")
+        ax.set_ylim(bottom=0)
+        legend(ax, loc="upper right", ncol=2)
+        return
+    if (DATA / "per_note_difficulty.csv").exists():
+        rows = read("per_note_difficulty.csv")
+        t = np.array([float(r["time_ms"]) / 1000.0 for r in rows])
+        d = np.array([float(r["difficulty"]) for r in rows])
+        hold = np.array([float(r["hold_duration_ms"]) for r in rows])
+        is_ln = hold > 0
+        rice = np.where(~is_ln, d, np.nan)
+        ln = np.where(is_ln, d, np.nan)
+        # Narrow bars preserve every note's contribution; the line gives the
+        # combined acc_d driver without smoothing away local changes.
+        width = max(np.nanmedian(np.diff(t)) * 0.72, 0.008) if len(t) > 1 else 0.02
+        ax.bar(
+            t,
+            np.where(~is_ln, d, 0.0),
+            width=width,
+            color="#ff9f6b",
+            alpha=0.72,
+            linewidth=0,
+            label="rice d_all",
+        )
+        ax.bar(
+            t,
+            np.where(is_ln, d, 0.0),
+            width=width,
+            color="#7cffb2",
+            alpha=0.72,
+            linewidth=0,
+            label="LN d_all",
+        )
+        ax.plot(t, d, color="#8fe3ff", lw=0.8, alpha=0.9, label="all notes d_all")
+        ax.set_ylim(bottom=0)
+
+        # A compact occupancy strip keeps note-type changes aligned with the
+        # difficulty trace without hiding the actual per-note values.
+        strip = ax.inset_axes([0.0, 0.0, 1.0, 0.13], sharex=ax)
+        strip.fill_between(t, 0, (~is_ln).astype(float), step="mid", color="#ff9f6b", alpha=0.55)
+        strip.fill_between(t, 1, 1 + is_ln.astype(float), step="mid", color="#7cffb2", alpha=0.55)
+        strip.set_ylim(0, 2)
+        strip.set_yticks([])
+        strip.set_facecolor("none")
+        strip.spines[:].set_visible(False)
+        strip.set_xlabel("note occupancy: rice / LN", fontsize=8, color="#b9c8d6", labelpad=1)
+        style(ax, "per-note accuracy-driver overlay", "map time (s)", "d_all / acc_d driver")
+        legend(ax, loc="upper right")
+        return
+    rows = read("input_state_bins.csv")
+    # Bins are difficulty-quantiled within each input class. Plot their means in
+    # exported order as the map-level d(t) trace available from the harness.
+    x = np.arange(len(rows))
+    y = np.array([float(r["mean_difficulty"]) for r in rows])
+    colors = {
+        name: color
+        for name, color in zip(
+            sorted({r["class"] for r in rows}),
+            ["#8fe3ff", "#7cffb2", "#ff9f6b", "#c39bff", "#ff6b81", "#ffd166", "#e6e8ee"],
+        )
+    }
+    ax.plot(x, y, color="#8fe3ff", lw=1.2, alpha=0.8)
+    for i, row in enumerate(rows):
+        ax.scatter(i, y[i], s=14, color=colors.get(row["class"], "#aaaaaa"), zorder=3)
+    style(
+        ax,
+        "per-note difficulty over map progression",
+        "map progression (exported state bins)",
+        "d_all / acc_d driver",
+    )
+    ax.set_yscale("log")
+
+
+def panel_probability_balance(ax) -> None:
+    """Show 320 probability above zero and all lower results below it."""
+    expected_path = DATA / "per_note_expected_counts.csv"
+    if not expected_path.exists():
+        ax.set_visible(False)
+        return
+
+    rows = read("per_note_expected_counts.csv")
+    rows = [r for r in rows if r["variant"] == "baseline"]
+    t = np.array([float(r["time_ms"]) / 1000.0 for r in rows])
+    colors = {
+        "miss": "#ef476f",
+        "p50": "#ff9f6b",
+        "p100": "#c39bff",
+        "p200": "#7cffb2",
+        "p300": "#8fe3ff",
+        "p320": "#ffd166",
+    }
+
+    # The zero line is the visual divider. 320 is the fixed reference level;
+    # lower judgements are shown as ratios against each note's 320 probability
+    # so the panel describes composition rather than raw probability.
+    # 320 is the fixed reference level for this comparison, not a varying
+    # series; keep it anchored at -1 so the lower outcomes remain readable.
+    ax.fill_between(t, -1.0, 0.0, step="mid", color=colors["p320"], alpha=0.1, label="320 reference")
+    p320 = np.array([float(r["p320"]) for r in rows])
+    lower = ("miss", "p50", "p100", "p200", "p300")
+    for key in lower:
+        probability = np.array([float(r[key]) for r in rows])
+        relative_probability = np.divide(
+            probability,
+            p320,
+            out=np.zeros_like(probability),
+            where=p320 > 0.0,
+        )
+        next_stack = -relative_probability
+        ax.fill_between(t, 0.0, next_stack, step="mid", color=colors[key], alpha=0.25, label=key)
+        ax.plot(t, next_stack, color=colors[key], lw=0.75, alpha=1.0)
+
+    style(ax, "", "map time (s)", "probability vs 320 (320 = -1)")
+    ax.set_ylim(min(-1.05, float(np.nanmin(next_stack)) - 0.03), 0.05)
+    legend(ax, loc="upper center", bbox_to_anchor=(0.5, -0.34), ncol=6, borderaxespad=0.0)
 
 
 def panel_misses(figure, ax, miss, diffs, skills, X, Y) -> None:
     style(
         ax,
-        "miss rate over (difficulty, skill)\n"
-        "misses come from the timing tail, not a separate term",
+        "miss rate over (difficulty, skill)\n" "misses come from the timing tail, not a separate term",
         "map difficulty (stars)",
         "player skill (star units)",
     )
 
     rate = np.clip(miss, 1e-6, 1.0)
-    filled = ax.contourf(
-        X, Y, np.log10(rate), levels=np.linspace(-6, 0, 25), cmap="inferno"
+    filled = ax.contourf(X, Y, np.log10(rate), levels=np.linspace(-6, 0, 25), cmap="inferno")
+    lines = ax.contour(
+        X, Y, np.log10(rate), levels=[-4, -3, -2, -1], colors="#8fe3ff", linewidths=0.9, alpha=0.85
     )
-    lines = ax.contour(X, Y, np.log10(rate), levels=[-4, -3, -2, -1],
-                       colors="#8fe3ff", linewidths=0.9, alpha=0.85)
     ax.clabel(lines, fmt=lambda v: f"{10 ** v:.2%}", fontsize=8, colors="#cfefff")
 
     ax.set_xscale("log")
@@ -307,23 +489,39 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--out", type=Path, default=DATA / "mania_surface_2d.png")
-    parser.add_argument("--map", type=Path,
-                        help="real beatmap supplying difficulty, windows, and note units")
-    parser.add_argument("--clock-rate", type=float, default=1.0,
-                        help="clock rate used to rate the map (default 1.0)")
-    parser.add_argument("--fit-skill", type=float, default=None,
-                        help="mark this skill on the composition panel")
-    parser.add_argument("--target-accuracy", type=float, default=None,
-                        help="mark this accuracy on the windows panel")
-    parser.add_argument("--no-dump", action="store_true",
-                        help="reuse the existing CSVs instead of re-running cargo")
+    parser.add_argument(
+        "--map",
+        type=Path,
+        required=True,
+        help="beatmap supplying difficulty, windows, and note units",
+    )
+    parser.add_argument(
+        "--fetch",
+        action="store_true",
+        help="download a missing numeric beatmap ID into local-fixtures/maps",
+    )
+    parser.add_argument(
+        "--clock-rate", type=float, default=1.0, help="clock rate used to rate the map (default 1.0)"
+    )
+    parser.add_argument(
+        "--fit-skill", type=float, default=None, help="mark this skill on the composition panel"
+    )
+    parser.add_argument(
+        "--target-accuracy", type=float, default=None, help="mark this accuracy on the windows panel"
+    )
+    parser.add_argument(
+        "--no-dump", action="store_true", help="reuse the existing CSVs instead of re-running cargo"
+    )
     args = parser.parse_args()
+
+    if args.fetch:
+        args.map = fetch_map(args.map)
 
     if not args.no_dump:
         dump(args)
 
-    difficulty = 13.774
-    source = "default synthetic slice"
+    difficulty = 0.0
+    source = args.map.stem
     meta_path = DATA / "surface_2d_meta.csv"
     if meta_path.exists():
         with meta_path.open() as handle:
@@ -335,17 +533,30 @@ def main() -> None:
     acc, miss, diffs, skills = load_grid()
     X, Y = np.meshgrid(diffs, skills)
 
-    figure = plt.figure(figsize=(16, 11), facecolor=PAPER)
-    grid = figure.add_gridspec(2, 2, hspace=0.30, wspace=0.24)
+    # For LN-focused inspection, keep the two panels with the most actionable
+    # information: judgement composition and the response to alternate windows.
+    figure = plt.figure(figsize=(16, 14), facecolor=PAPER)
+    grid = figure.add_gridspec(2, 2, height_ratios=[1.15, 1.72], hspace=0.34, wspace=0.20)
 
-    panel_shortfall(figure, figure.add_subplot(grid[0, 0]), acc, diffs, skills, X, Y)
-    panel_bands(figure.add_subplot(grid[0, 1]), difficulty, args.fit_skill)
-    panel_windows(figure.add_subplot(grid[1, 0]), args.target_accuracy)
-    panel_misses(figure, figure.add_subplot(grid[1, 1]), miss, diffs, skills, X, Y)
+    panel_bands(figure.add_subplot(grid[0, 0]), difficulty, args.fit_skill)
+    panel_windows(figure.add_subplot(grid[0, 1]), args.target_accuracy)
+    instrument = grid[1, :].subgridspec(2, 1, height_ratios=[2.1, 1.0], hspace=0.0)
+    composition_ax = figure.add_subplot(instrument[0, 0])
+    balance_ax = figure.add_subplot(instrument[1, 0], sharex=composition_ax)
+    panel_input_state(composition_ax)
+    panel_probability_balance(balance_ax)
+    composition_ax.tick_params(axis="x", labelbottom=False)
+    # Treat the two axes as one continuous instrument: remove the touching
+    # spines so no artificial zero-line or gap separates the panels.
+    composition_ax.spines["bottom"].set_visible(False)
+    balance_ax.spines["top"].set_visible(False)
+    balance_ax.yaxis.grid(False)
 
     figure.suptitle(
         f"osu!mania hit result surface  —  {source}  —  {difficulty:.2f} stars",
-        color=FG, fontsize=14, y=0.965,
+        color=FG,
+        fontsize=14,
+        y=0.965,
     )
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
