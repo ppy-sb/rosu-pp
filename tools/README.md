@@ -224,7 +224,11 @@ better starting point, since the 3D view is one difficulty slice.
 
 ```sh
 tools/mania_surface_2d.py --fit-skill 10.305 --target-accuracy 0.91672
+tools/mania_surface_2d.py --map 5088628 --fetch
 ```
+
+With `--fetch`, a numeric `--map` value is downloaded from osu! into
+`local-fixtures/maps/<id>.osu` when it is not already present.
 
 1. Accuracy shortfall `1 - acc`, log-scaled — accuracy itself is flat above ~95% over
    most of the plane and hides the structure.
