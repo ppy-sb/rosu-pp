@@ -792,8 +792,8 @@ EZ pattern={:.6} timing={:.6} pp={:.6} scalar={:.6}",
     );
 
     assert!(
-        perf_ez.window_scalar < 1.0,
-        "wider windows should discount the score, got {}",
+        (perf_ez.window_scalar - 1.0).abs() < 1e-9,
+        "surface must not re-price a score against natural windows: got {}",
         perf_ez.window_scalar
     );
 
@@ -3147,6 +3147,7 @@ struct MultiPriced {
     base_difficulty_pp: f64,
     accuracy_proportion: f64,
     surface_multiplier: f64,
+    surface_only_pp: f64,
     acc_multiplier: f64,
     variety_multiplier: f64,
     length_multiplier: f64,
@@ -3788,6 +3789,10 @@ fn load_multiuser() -> Vec<MultiPriced> {
         let base_difficulty_pp = 9.8 * base_stars.powf(2.2);
         let accuracy_proportion = performance_proportion(score_accuracy);
         let surface_multiplier = perf.window_scalar.max(0.0).powf(2.2);
+        let surface_only_pp = perf.pp_pattern
+            * accuracy_proportion
+            * perf.acc_multiplier
+            * (surface_multiplier - 1.0);
         let neutral_pp = compute_difficulty_value(attrs.stars, score_accuracy, 1.0)
             * if has_mod(&mods, "NF") { 0.75 } else { 1.0 }
             * perf.variety_multiplier
@@ -3812,6 +3817,7 @@ fn load_multiuser() -> Vec<MultiPriced> {
             base_difficulty_pp,
             accuracy_proportion,
             surface_multiplier,
+            surface_only_pp,
             acc_multiplier: perf.acc_multiplier,
             variety_multiplier: perf.variety_multiplier,
             length_multiplier: perf.length_multiplier,
@@ -3921,6 +3927,10 @@ fn load_ladder(path: &str) -> Vec<MultiPriced> {
             base_difficulty_pp: 9.8 * base_stars.powf(2.2),
             accuracy_proportion: performance_proportion(score_accuracy),
             surface_multiplier: perf.window_scalar.max(0.0).powf(2.2),
+            surface_only_pp: perf.pp_pattern
+                * performance_proportion(score_accuracy)
+                * perf.acc_multiplier
+                * (perf.window_scalar.max(0.0).powf(2.2) - 1.0),
             acc_multiplier: perf.acc_multiplier,
             variety_multiplier: perf.variety_multiplier,
             length_multiplier: perf.length_multiplier,
@@ -4205,14 +4215,11 @@ fn multiuser_report() {
     // deciding whether to strengthen its contribution to PP. These are all
     // non-EZ so window widening cannot be mistaken for ordinary surface motion.
     println!("\nnon-EZ surface-transfer distributions:");
-    println!("  {:<24} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8}",
-        "cohort", "n", "mean", "geo", "p10", "median", "p90");
+    println!("  {:<24} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>10}",
+        "cohort", "n", "mean", "geo", "p10", "median", "p90", "surf/pp");
     let print_surface_cohort = |label: &str, rows: Vec<&MultiPriced>| {
-        let mut values: Vec<f64> = rows
-            .into_iter()
-            .filter(|r| !r.row.mods.contains("EZ"))
-            .map(|r| r.surface_multiplier.max(f64::MIN_POSITIVE))
-            .collect();
+        let rows: Vec<&MultiPriced> = rows.into_iter().filter(|r| !r.row.mods.contains("EZ")).collect();
+        let mut values: Vec<f64> = rows.iter().map(|r| r.surface_multiplier.max(f64::MIN_POSITIVE)).collect();
         if values.is_empty() {
             println!("  {label:<24} {:>5} (empty)", 0);
             return;
@@ -4222,8 +4229,10 @@ fn multiuser_report() {
         let mean = values.iter().sum::<f64>() / n as f64;
         let geo = values.iter().map(|v| v.ln()).sum::<f64>().div_euclid(n as f64).exp();
         let quantile = |p: f64| values[((n - 1) as f64 * p).round() as usize];
-        println!("  {label:<24} {n:>5} {mean:>8.4} {geo:>8.4} {:>8.4} {:>8.4} {:>8.4}",
-            quantile(0.10), quantile(0.50), quantile(0.90));
+        let pp_sum: f64 = rows.iter().map(|r| r.current_pp).sum();
+        let surface_sum: f64 = rows.iter().map(|r| r.surface_only_pp).sum();
+        println!("  {label:<24} {n:>5} {mean:>8.4} {geo:>8.4} {:>8.4} {:>8.4} {:>8.4} {:>9.2}%",
+            quantile(0.10), quantile(0.50), quantile(0.90), 100.0 * surface_sum / pp_sum);
     };
     print_surface_cohort("all non-EZ", all.iter().copied().collect());
     print_surface_cohort("4K rice LN<30%", all.iter().copied()

@@ -1300,23 +1300,13 @@ fn window_scalar_with_model(
         anticipation_offset: 0.0,
         ..*model
     };
-    let baseline_units = attrs
-        .input_state_bins
-        .filter(|_| model.recovery_offset != 0.0)
-        .map(|bins| units_from_input_state_bins(&bins, attrs, f64::from(total), &baseline_model))
-        .filter(|units| !units.is_empty())
-        .unwrap_or_else(|| {
-            judgement_units(
-                attrs,
-                f64::from(total),
-                &baseline_model,
-                !per_note_difficulty_disabled(),
-            )
-        });
+    // Keep the structural population identical on both sides. Rebuilding units
+    // from mod-affected cached bins would mix SR changes into the window surface.
+    let baseline_units = units.clone();
     let baseline = fit_with_quality(
         &counts,
         &baseline_units,
-        &attrs.map_windows,
+        &attrs.hit_windows,
         &baseline_model,
     );
 
@@ -1372,36 +1362,23 @@ fn compute_timing_pp(
         !per_note_difficulty_disabled(),
     );
 
-    // Fit skill through actual windows (with mods and input-state)
+    // Fit skill through actual windows (with mods and input-state).
     let played = fit_with_quality(&counts, &units, &attrs.hit_windows, model);
 
-    // Fit skill through natural windows with input-state recovery disabled
+    // Fit the exact same structural units through the actual judgement windows.
+    // The score's counts were produced under these windows; comparing them to
+    // natural (unmodded) windows would charge EZ/HR a second time and turn the
+    // surface into a synthetic mod penalty rather than an accuracy measurement.
     let baseline_model = ErrorModel {
         recovery_offset: 0.0,
         anticipation_offset: 0.0,
         ..*model
     };
-    // Compare like with like: input-state bins describe the note population on
-    // both sides. Only recovery is disabled in the natural baseline. Falling
-    // back to ordinary LN bins here would turn representation differences into
-    // apparent timing skill, especially on LN-heavy maps.
-    let baseline_units = attrs
-        .input_state_bins
-        .filter(|_| model.recovery_offset != 0.0)
-        .map(|bins| units_from_input_state_bins(&bins, attrs, f64::from(total), &baseline_model))
-        .filter(|units| !units.is_empty())
-        .unwrap_or_else(|| {
-            judgement_units(
-                attrs,
-                f64::from(total),
-                &baseline_model,
-                !per_note_difficulty_disabled(),
-            )
-        });
+    let baseline_units = units.clone();
     let baseline = fit_with_quality(
         &counts,
         &baseline_units,
-        &attrs.map_windows,
+        &attrs.hit_windows,
         &baseline_model,
     );
 
