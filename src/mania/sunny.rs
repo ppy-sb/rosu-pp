@@ -21,8 +21,28 @@ use crate::model::{
     mode::GameMode,
 };
 
-use crate::mania::sunny_accuracy::{ErrorModel, JudgementUnit, LN_DURATION_BUCKETS, fit_with_quality};
+use crate::mania::sunny_accuracy::{
+    ErrorModel, JudgementUnit, LN_DURATION_BUCKETS, expected_counts_at_reference_capacity,
+};
+#[cfg(test)]
+use crate::mania::sunny_accuracy::fit_with_quality;
 use crate::mania::sunny_windows::{ManiaHitWindows, hit_windows};
+
+/// Converts the forward model's expected-loss ratio into a PP multiplier.
+///
+/// Keep the empirical curve directional while compressing its tails. The
+/// multi-user sensitivity report showed that the previous `0.7` exponent moved
+/// hundreds of scores by over 20%.
+const TIMING_LOSS_TRANSFER_EXPONENT: f64 = 0.16;
+
+/// Global normalization for absolute expected timing loss.
+///
+/// This is deliberately not obtained by evaluating a second set of windows. It
+/// is the 1,147-score non-EZ cohort median: under the previous `0.11` anchor
+/// its median timing multiplier was `0.5047`, which corresponds to an absolute
+/// expected loss of about `0.0415`. Centering that cohort here makes the typical
+/// non-window-mod score move minimally while preserving relative curve motion.
+const TIMING_LOSS_REFERENCE: f64 = 0.0415;
 
 /// The upper edges, in ms, of the first [`LN_DURATION_BUCKETS`] - 1 duration bins;
 /// anything longer falls in the last.
@@ -554,10 +574,9 @@ pub struct SunnyManiaDifficultyAttributes {
     pub great_hit_window: f64,
     /// The full judgement window set the score will be graded against.
     ///
-    /// Mods are already folded in, which is what lets the performance stage price
-    /// a mod without knowing it was used: `EZ` widens every window here, so the
-    /// same judgement counts imply a lower skill and earn less. See
-    /// [`compute_difficulty_value`].
+    /// Mods are already folded in, which lets the performance stage price a mod
+    /// without knowing it was used: `EZ` widens every window here, reducing the
+    /// forward model's expected timing loss.
     pub hit_windows: ManiaHitWindows,
     /// The max combo of the map.
     pub max_combo: u32,
@@ -606,11 +625,9 @@ pub struct SunnyManiaDifficultyAttributes {
     pub input_state_bins: Option<[InputStateBin; INPUT_STATE_BINS]>,
     /// The map's own judgement windows with the window-affecting mods stripped.
     ///
-    /// Identical to [`Self::hit_windows`] for a no-mod score, and narrower or wider than
-    /// it under `HR`/`EZ`. Carried so [`window_scalar`] can price a score against the
-    /// windows its own map would have given it, which confines the surface to pricing
-    /// *mods* rather than also pricing the map's OD. See `REFERENCE_WINDOWS` for what the
-    /// alternative costs.
+    /// Retained for historical calibration reports. Production SR and PP use
+    /// [`Self::hit_windows`] exclusively and never price a score through this
+    /// counterfactual window set.
     pub map_windows: ManiaHitWindows,
     /// Whether long notes give a single combined judgement (ScoreV1 / classic)
     /// rather than separate head and release judgements (ScoreV2).
@@ -644,11 +661,15 @@ pub struct SunnyManiaPerformanceAttributes {
     pub window_scalar: f64,
     /// Accuracy-neutral PP contribution from Sunny's pattern calculation.
     pub pp_pattern: f64,
-    /// Signed adjustment from the merged accuracy and per-note timing surface.
+    /// Signed adjustment from accuracy and forward timing difficulty.
     pub pp_timing: f64,
-    /// Fitted timing skill through actual windows (with mods and input-state).
+    /// Expected accuracy at the fixed timing probe through the played windows.
+    pub timing_expected_accuracy: f64,
+    /// Global expected-accuracy anchor used to normalize absolute timing loss.
+    pub timing_reference_accuracy: f64,
+    /// Deprecated fitted timing skill output. Production PP no longer fits skill.
     pub timing_skill_played: f64,
-    /// Fitted timing skill through natural windows with input-state recovery disabled.
+    /// Deprecated fitted timing skill output. Production PP no longer fits skill.
     pub timing_skill_baseline: f64,
 }
 
@@ -740,10 +761,8 @@ pub fn calculate_performance(
 
 /// [`calculate_performance`] under an explicit [`ErrorModel`].
 ///
-/// The model reaches pp only through [`window_scalar_with_model`], so this differs
-/// from the public entry point in exactly one term. Production calls
-/// [`calculate_performance`]; this exists so a calibration candidate can be priced
-/// against the shipped default on identical scores.
+/// Production calls [`calculate_performance`]; this exists so a calibration candidate
+/// can be priced against the shipped default on identical scores.
 pub(crate) fn calculate_performance_with_model(
     attrs: &SunnyManiaDifficultyAttributes,
     mods: &GameMods,
@@ -751,8 +770,8 @@ pub(crate) fn calculate_performance_with_model(
     model: &ErrorModel,
 ) -> SunnyManiaPerformanceAttributes {
     // NF still gets a flat factor: failing is a scoring matter that the timing
-    // surface says nothing about, so there is nothing for it to price. EZ has no
-    // factor here on purpose — see the compositional calculation below.
+    // model says nothing about. EZ has no factor here because its windows are
+    // evaluated directly below.
     let mut multiplier = 1.0;
 
     if has_mod(mods, "NF") {
@@ -764,7 +783,7 @@ pub(crate) fn calculate_performance_with_model(
     // === COMPOSITIONAL ARCHITECTURE ===
     // PP is split into two additive components:
     // 1. Pattern difficulty (from sunny's base star rating)
-    // 2. Timing difficulty (from the accuracy surface)
+    // 2. Timing difficulty (from forward expected judgment loss)
 
     // Pattern difficulty: base calculation from sunny
     let variety_multiplier = variety_multiplier(attrs.variety);
@@ -778,32 +797,23 @@ pub(crate) fn calculate_performance_with_model(
     let pp_pattern =
         9.8 * pattern_difficulty.powf(2.2) * variety_multiplier * length_multiplier * multiplier;
 
-    // Timing difficulty: from the accuracy surface
+    // Timing difficulty: forward prediction at a fixed map-relative probe.
     let timing_result = compute_timing_pp(attrs, state, model);
-    // Treat the surface as a transfer of Sunny's existing pattern value. The
-    // fitted played/natural ratio already moves below one for wider EZ windows
-    // and above one for narrower HR windows.
-    let surface_transfer = if timing_result.played_skill > 0.0 {
-        (timing_result.played_skill / timing_result.baseline_skill).max(0.0)
-    } else {
-        1.0
-    };
-    let surface_power = surface_transfer.powf(2.2);
+    // Expected loss is a model-space quantity, not a calibrated PP ratio.
+    let surface_power = timing_result
+        .loss_ratio
+        .powf(TIMING_LOSS_TRANSFER_EXPONENT);
 
     // Provisional merged accuracy reward. `performance_proportion` and
     // `acc_multiplier` keep Sunny's calibrated absolute-accuracy response while
-    // the per-note surface supplies the relative window/input-state response.
-    // Once the surface's absolute reward is calibrated it can replace these two
+    // the forward model supplies the relative window/input-state response.
+    // Once the model's absolute reward is calibrated it can replace these two
     // legacy factors here, without becoming a second independent pp source.
     let accuracy_reward = accuracy_proportion * acc_multiplier * surface_power;
     let pp_timing = pp_pattern * (accuracy_reward - 1.0);
 
     // Legacy window_scalar for compatibility (kept for reporting)
-    let window_scalar = if timing_result.baseline_skill > 0.0 {
-        timing_result.played_skill / timing_result.baseline_skill
-    } else {
-        1.0
-    };
+    let window_scalar = surface_power.max(0.0).powf(1.0 / 2.2);
 
     // Total pp is additive composition
     let pp = pp_pattern + pp_timing;
@@ -820,8 +830,10 @@ pub(crate) fn calculate_performance_with_model(
         window_scalar,
         pp_pattern,
         pp_timing,
-        timing_skill_played: timing_result.played_skill,
-        timing_skill_baseline: timing_result.baseline_skill,
+        timing_expected_accuracy: timing_result.expected_accuracy,
+        timing_reference_accuracy: timing_result.reference_accuracy,
+        timing_skill_played: 0.0,
+        timing_skill_baseline: 0.0,
     }
 }
 
@@ -1324,17 +1336,17 @@ fn window_scalar_with_model(
 /// Result of timing pp calculation with component breakdown.
 #[derive(Clone, Copy, Debug, Default)]
 struct TimingPpResult {
-    played_skill: f64,
-    baseline_skill: f64,
+    loss_ratio: f64,
+    expected_accuracy: f64,
+    reference_accuracy: f64,
 }
 
-/// Compute the two fits used by the merged accuracy surface.
+/// Evaluate timing difficulty without inferring anything from score counts.
 ///
-/// This separates timing precision from pattern difficulty, measuring:
-/// 1. Demonstrated timing skill through actual windows (with mods and input-state)
-/// 2. Expected timing skill through natural windows with recovery disabled
-/// The caller combines their ratio with Sunny's provisional absolute-accuracy
-/// reward; this function does not manufacture a separate timing pp value.
+/// The map is probed at its own star rating so the scale follows the map while
+/// remaining independent of the submitted score. Only the windows actually in
+/// effect are evaluated. Absolute expected judgment loss is normalized against
+/// one global calibration anchor, never against counterfactual map windows.
 fn compute_timing_pp(
     attrs: &SunnyManiaDifficultyAttributes,
     state: SunnyScoreState,
@@ -1343,17 +1355,12 @@ fn compute_timing_pp(
     let total = state.total_hits();
 
     if total == 0 || attrs.n_objects == 0 || attrs.stars <= 0.0 {
-        return TimingPpResult::default();
+        return TimingPpResult {
+            loss_ratio: 1.0,
+            reference_accuracy: 1.0 - TIMING_LOSS_REFERENCE,
+            ..TimingPpResult::default()
+        };
     }
-
-    let counts = [
-        state.n320,
-        state.n300,
-        state.n200,
-        state.n100,
-        state.n50,
-        state.misses,
-    ];
 
     let units = judgement_units(
         attrs,
@@ -1362,47 +1369,19 @@ fn compute_timing_pp(
         !per_note_difficulty_disabled(),
     );
 
-    // Fit skill through actual windows (with mods and input-state).
-    let played = fit_with_quality(&counts, &units, &attrs.hit_windows, model);
-
-    // Fit the exact same structural units through the actual judgement windows.
-    // The score's counts were produced under these windows; comparing them to
-    // natural (unmodded) windows would charge EZ/HR a second time and turn the
-    // surface into a synthetic mod penalty rather than an accuracy measurement.
-    let baseline_model = ErrorModel {
-        recovery_offset: 0.0,
-        anticipation_offset: 0.0,
-        ..*model
-    };
-    let baseline_units = units.clone();
-    let baseline = fit_with_quality(
-        &counts,
-        &baseline_units,
+    let expected = expected_counts_at_reference_capacity(
+        &units,
         &attrs.hit_windows,
-        &baseline_model,
+        model,
+        attrs.stars,
     );
+    let expected_accuracy = expected.custom_accuracy();
+    let expected_loss = (1.0 - expected_accuracy).max(f64::EPSILON);
 
-    if played.skill <= 0.0 || baseline.skill <= 0.0 {
-        return TimingPpResult {
-            played_skill: played.skill,
-            baseline_skill: baseline.skill,
-        };
-    }
-
-    // The core insight: fitted skill is window-dependent.
-    // When the same counts come through wider windows (EZ), the fitted skill
-    // is LOWER because the model interprets it as "less precision needed".
-    // We want: wider windows → lower pp, narrower windows → higher pp.
-
-    // Transfer the fitted skill through the observed surface relative to the
-    // same score evaluated against the map's natural windows.
-    // The fitted skill already contains the natural accuracy response to the
-    // observed hit distribution. Keep the surface transfer multiplicative so
-    // input-state and mod effects decide how much of that accuracy is rewarded.
-    // Do not add a hand-shaped accuracy curve or an OD reference here.
     TimingPpResult {
-        played_skill: played.skill,
-        baseline_skill: baseline.skill,
+        loss_ratio: expected_loss / TIMING_LOSS_REFERENCE,
+        expected_accuracy,
+        reference_accuracy: 1.0 - TIMING_LOSS_REFERENCE,
     }
 }
 

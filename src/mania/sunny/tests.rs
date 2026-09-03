@@ -779,22 +779,25 @@ fn ez_is_priced_by_the_windows_not_a_multiplier() {
     let perf_ez = calculate_performance(&ez, &ez_mods, state);
 
     println!(
-        "surface A/B: NM pattern={:.6} timing={:.6} pp={:.6} scalar={:.6}; \
-EZ pattern={:.6} timing={:.6} pp={:.6} scalar={:.6}",
+        "surface A/B: NM pattern={:.6} timing={:.6} pp={:.6} scalar={:.6} expected={:.6}; \
+EZ pattern={:.6} timing={:.6} pp={:.6} scalar={:.6} expected={:.6}",
         perf_nm.pp_pattern,
         perf_nm.pp_timing,
         perf_nm.pp,
         perf_nm.window_scalar,
+        perf_nm.timing_expected_accuracy,
         perf_ez.pp_pattern,
         perf_ez.pp_timing,
         perf_ez.pp,
-        perf_ez.window_scalar
+        perf_ez.window_scalar,
+        perf_ez.timing_expected_accuracy
     );
 
     assert!(
-        (perf_ez.window_scalar - 1.0).abs() < 1e-9,
-        "surface must not re-price a score against natural windows: got {}",
-        perf_ez.window_scalar
+        perf_ez.window_scalar < perf_nm.window_scalar,
+        "wider windows must lower the forward timing value relative to NM: {} vs {}",
+        perf_ez.window_scalar,
+        perf_nm.window_scalar
     );
 
     assert!(
@@ -844,6 +847,35 @@ fn hr_is_rewarded_by_the_same_mechanism() {
         "narrower windows should reward the score, got {}",
         perf_hr.window_scalar
     );
+}
+
+#[test]
+fn timing_value_does_not_fit_the_observed_judgement_mix() {
+    let map = synthetic_map(8.0, 900, 125.0);
+    let mods = GameMods::default();
+    let attrs = calculate(&map, &mods, 1.0, Some(true), None).unwrap();
+    let notes = attrs.n_objects as u32;
+    let clean = SunnyScoreState {
+        n320: notes * 95 / 100,
+        n300: notes - notes * 95 / 100,
+        ..Default::default()
+    };
+    let rough = SunnyScoreState {
+        n320: notes * 70 / 100,
+        n200: notes - notes * 70 / 100,
+        ..Default::default()
+    };
+
+    let clean = calculate_performance(&attrs, &mods, clean);
+    let rough = calculate_performance(&attrs, &mods, rough);
+
+    assert_eq!(clean.window_scalar, rough.window_scalar);
+    assert_eq!(
+        clean.timing_expected_accuracy,
+        rough.timing_expected_accuracy
+    );
+    assert_eq!(clean.timing_skill_played, 0.0);
+    assert_eq!(rough.timing_skill_played, 0.0);
 }
 
 /// [`REFERENCE_WINDOWS`] has to be a hand-written literal to stay `const`, so it

@@ -1219,6 +1219,21 @@ pub fn expected_counts(
     ExpectedCounts(totals)
 }
 
+/// Expected counts at an externally chosen map-relative reference capacity.
+///
+/// Unlike [`skill_for_counts`] and [`fit_with_quality`], this is a forward-only
+/// operation: observed judgments never determine `reference_capacity`. Production
+/// PP uses the map's star rating as the fixed probe so the curve can compare window
+/// and input-state conditions without estimating player skill.
+pub fn expected_counts_at_reference_capacity(
+    units: &[JudgementUnit],
+    windows: &ManiaHitWindows,
+    model: &ErrorModel,
+    reference_capacity: f64,
+) -> ExpectedCounts {
+    expected_counts(units, windows, model, reference_capacity)
+}
+
 // ---------------------------------------------------------------------------
 // Inversion: score -> skill
 // ---------------------------------------------------------------------------
