@@ -925,8 +925,7 @@ fn production_pricing_ignores_legacy_reference_switches() {
     }
 }
 
-/// The one case with nothing to measure. Everything else gets priced, however
-/// badly the model fits — see [`window_scalar`].
+/// The one case with no timing conditions to compare.
 #[test]
 fn an_empty_score_has_no_windows_to_price() {
     let map = synthetic_map(8.0, 900, 125.0);
@@ -937,7 +936,7 @@ fn an_empty_score_has_no_windows_to_price() {
 
     assert_eq!(
         empty.window_scalar, 1.0,
-        "an empty score has nothing to fit"
+        "an empty score has no timing conditions to compare"
     );
 }
 
@@ -2455,15 +2454,17 @@ fn ladder_report() {
     }
 }
 
-/// Not an assertion — dumps the surface to CSV under `target/surface/` so it can
-/// be plotted. Three files, each a different slice of the same object:
+/// Diagnostic-only latent-skill model dump. Production PP does not evaluate the
+/// surface at `skill = stars`; it uses a fixed-spread relative transfer instead.
+///
+/// Not an assertion — dumps three CSV slices under `target/surface/`:
 ///
 /// - `grid.csv`: 305-weighted accuracy over (difficulty, skill) at
 ///   [`REFERENCE_WINDOWS`]. This *is* the surface.
 /// - `bands.csv`: the five timing-band shares plus miss rate against skill at one
 ///   fixed difficulty — the mechanism the surface is built from.
 /// - `windows.csv`: accuracy against skill at one difficulty for several window
-///   sets, which is what [`window_scalar`] reads horizontally.
+///   sets, retained for calibration and historical comparison.
 ///
 /// Run with `cargo test surface_dump -- --ignored --nocapture`.
 #[test]

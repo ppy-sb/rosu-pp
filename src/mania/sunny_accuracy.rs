@@ -245,13 +245,39 @@
 //! [`FitQuality::is_plausible`] is the right objective here even though it is the wrong
 //! gate for pricing.
 
-// The fitting path is wired into `sunny::window_scalar`. Several forward-prediction
-// helpers are not yet consumed by it — they are used by the tests and by the
-// calibration work still to come, so the module keeps a narrow allowance rather than
-// deleting API the fit will need.
+// Production PP uses the fixed-spread transfer. The fitted-skill path remains for
+// diagnostics and calibration experiments, so the module keeps a narrow allowance
+// rather than deleting API those tools still need.
 #![allow(dead_code)]
 
 use crate::mania::sunny_windows::{ManiaHitWindows, ManiaJudgement};
+
+// Timing-model configuration lives here so fitted measurements, gauge choices, and
+// provisional PP-transfer settings cannot be mistaken for one another at call sites.
+const DEFAULT_SIGMA_REF: f64 = 18.0; // Skill-unit gauge; not an empirical timing spread.
+const DEFAULT_SKILL_EXPONENT: f64 = 1.7; // Held value; replay data only bounds it loosely.
+const DEFAULT_DIFFICULTY_FLOOR: f64 = 0.6;
+const DEFAULT_LAPSE_WEIGHT: f64 = 0.0296;
+const DEFAULT_LAPSE_RATIO: f64 = 3.339;
+const DEFAULT_SHORT_HOLD_SCALE: f64 = 120.0;
+const DEFAULT_RELEASE_MEAN_OFFSET: f64 = 8.0; // Unfitted starting value.
+const MEASURED_RECOVERY_OFFSET: f64 = 20.425;
+const MEASURED_RECOVERY_TAU: f64 = 116.68;
+const MEASURED_ANTICIPATION_OFFSET: f64 = -2.517;
+
+/// Provisional core spread used to compare timing conditions, in milliseconds.
+///
+/// This is deliberately a fixed probe, not a claim about absolute player precision.
+/// A preliminary replay sample measured centered hit-time residuals at 8.52 ms; the
+/// rounded value here must be checked against the broader replay corpus before it is
+/// treated as a population estimate. Hold-duration distributions do not inform it.
+pub(crate) const TIMING_TRANSFER_CORE_SIGMA: f64 = 8.5;
+
+/// Compresses the fixed-probe expected-loss ratio before it enters PP.
+///
+/// Chosen from the multi-user sensitivity report to prevent the raw surface tails
+/// from dominating PP. This is a transfer tuning parameter, not a replay fit.
+pub(crate) const TIMING_LOSS_TRANSFER_EXPONENT: f64 = 0.16;
 
 /// How timing error spreads as a player is pushed past their skill level.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -533,22 +559,22 @@ pub struct ErrorModel {
 impl Default for ErrorModel {
     fn default() -> Self {
         Self {
-            sigma_ref: 18.0,
-            skill_exponent: 1.7,
-            difficulty_floor: 0.6,
+            sigma_ref: DEFAULT_SIGMA_REF,
+            skill_exponent: DEFAULT_SKILL_EXPONENT,
+            difficulty_floor: DEFAULT_DIFFICULTY_FLOOR,
             sigma_floor: 0.0,
-            lapse_weight: 0.0296,
-            lapse_ratio: 3.339,
+            lapse_weight: DEFAULT_LAPSE_WEIGHT,
+            lapse_ratio: DEFAULT_LAPSE_RATIO,
             // The no-asymmetry floor until the sweep says otherwise, so the shipped
             // default still rests on the derived `sqrt(2)` rather than on a guess.
             release_sigma_ratio: 1.0,
             short_hold_penalty: 0.0,
-            short_hold_scale: 120.0,
+            short_hold_scale: DEFAULT_SHORT_HOLD_SCALE,
             slip_rate: 0.0,
-            release_mean_offset: 8.0,
-            recovery_offset: 20.425,
-            recovery_tau: 116.68,
-            anticipation_offset: -2.517,
+            release_mean_offset: DEFAULT_RELEASE_MEAN_OFFSET,
+            recovery_offset: MEASURED_RECOVERY_OFFSET,
+            recovery_tau: MEASURED_RECOVERY_TAU,
+            anticipation_offset: MEASURED_ANTICIPATION_OFFSET,
         }
     }
 }
@@ -869,6 +895,19 @@ pub fn judgement_probabilities_scaled(
 
     let sigma = model.sigma(difficulty, skill) * scale;
 
+    judgement_probabilities_with_sigma(windows, model, sigma, mu)
+}
+
+/// Judgement probabilities for an explicitly supplied timing spread.
+///
+/// This bypasses the latent skill-to-spread mapping while retaining the calibrated
+/// mixture shape and mean-offset behavior.
+fn judgement_probabilities_with_sigma(
+    windows: &ManiaHitWindows,
+    model: &ErrorModel,
+    sigma: f64,
+    mu: f64,
+) -> JudgementProbabilities {
     let mut probabilities = [0.0; 6];
     // Mass still outside every window considered so far, starting with all of it.
     let mut remaining = 1.0;
@@ -1219,19 +1258,39 @@ pub fn expected_counts(
     ExpectedCounts(totals)
 }
 
-/// Expected counts at an externally chosen map-relative reference capacity.
+/// Expected counts at a fixed core timing spread in milliseconds.
 ///
-/// Unlike [`skill_for_counts`] and [`fit_with_quality`], this is a forward-only
-/// operation: observed judgments never determine `reference_capacity`. Production
-/// PP uses the map's star rating as the fixed probe so the curve can compare window
-/// and input-state conditions without estimating player skill.
-pub fn expected_counts_at_reference_capacity(
+/// Unlike [`expected_counts`], local difficulty and latent player skill do not set
+/// the distribution width. This is the production transfer probe: the caller supplies
+/// a provisional spread, while map structure can still alter LN spread and measured
+/// input-state mean offsets.
+pub fn expected_counts_at_core_sigma(
     units: &[JudgementUnit],
     windows: &ManiaHitWindows,
     model: &ErrorModel,
-    reference_capacity: f64,
+    core_sigma: f64,
 ) -> ExpectedCounts {
-    expected_counts(units, windows, model, reference_capacity)
+    let mut totals = [0.0; 6];
+    assert!(
+        core_sigma.is_finite() && core_sigma > 0.0,
+        "core timing spread must be finite and positive"
+    );
+
+    for unit in units {
+        let sigma = core_sigma * unit.sigma_scale;
+        let probabilities = judgement_probabilities_with_sigma(
+            windows,
+            model,
+            sigma,
+            unit.mean_offset + unit.fading_mean_offset,
+        );
+
+        for judgement in ManiaJudgement::ALL {
+            totals[judgement as usize] += unit.weight * probabilities.get(judgement);
+        }
+    }
+
+    ExpectedCounts(totals)
 }
 
 // ---------------------------------------------------------------------------

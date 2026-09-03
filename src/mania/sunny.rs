@@ -14,35 +14,20 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use rosu_mods::{Acronym, GameMods};
 use crate::model::{
     beatmap::Beatmap,
     hit_object::{HitObject, HitObjectKind},
     mode::GameMode,
 };
+use rosu_mods::{Acronym, GameMods};
 
-use crate::mania::sunny_accuracy::{
-    ErrorModel, JudgementUnit, LN_DURATION_BUCKETS, expected_counts_at_reference_capacity,
-};
 #[cfg(test)]
 use crate::mania::sunny_accuracy::fit_with_quality;
-use crate::mania::sunny_windows::{ManiaHitWindows, hit_windows};
-
-/// Converts the forward model's expected-loss ratio into a PP multiplier.
-///
-/// Keep the empirical curve directional while compressing its tails. The
-/// multi-user sensitivity report showed that the previous `0.7` exponent moved
-/// hundreds of scores by over 20%.
-const TIMING_LOSS_TRANSFER_EXPONENT: f64 = 0.16;
-
-/// Global normalization for absolute expected timing loss.
-///
-/// This is deliberately not obtained by evaluating a second set of windows. It
-/// is the 1,147-score non-EZ cohort median: under the previous `0.11` anchor
-/// its median timing multiplier was `0.5047`, which corresponds to an absolute
-/// expected loss of about `0.0415`. Centering that cohort here makes the typical
-/// non-window-mod score move minimally while preserving relative curve motion.
-const TIMING_LOSS_REFERENCE: f64 = 0.0415;
+use crate::mania::sunny_accuracy::{
+    expected_counts_at_core_sigma, ErrorModel, JudgementUnit, LN_DURATION_BUCKETS,
+    TIMING_LOSS_TRANSFER_EXPONENT, TIMING_TRANSFER_CORE_SIGMA,
+};
+use crate::mania::sunny_windows::{hit_windows, ManiaHitWindows};
 
 /// The upper edges, in ms, of the first [`LN_DURATION_BUCKETS`] - 1 duration bins;
 /// anything longer falls in the last.
@@ -625,9 +610,8 @@ pub struct SunnyManiaDifficultyAttributes {
     pub input_state_bins: Option<[InputStateBin; INPUT_STATE_BINS]>,
     /// The map's own judgement windows with the window-affecting mods stripped.
     ///
-    /// Retained for historical calibration reports. Production SR and PP use
-    /// [`Self::hit_windows`] exclusively and never price a score through this
-    /// counterfactual window set.
+    /// Production PP uses these as the natural-window denominator of the relative
+    /// timing transfer. [`Self::hit_windows`] remains the played side.
     pub map_windows: ManiaHitWindows,
     /// Whether long notes give a single combined judgement (ScoreV1 / classic)
     /// rather than separate head and release judgements (ScoreV2).
@@ -663,9 +647,9 @@ pub struct SunnyManiaPerformanceAttributes {
     pub pp_pattern: f64,
     /// Signed adjustment from accuracy and forward timing difficulty.
     pub pp_timing: f64,
-    /// Expected accuracy at the fixed timing probe through the played windows.
+    /// Expected accuracy at the fixed-spread probe through the played conditions.
     pub timing_expected_accuracy: f64,
-    /// Global expected-accuracy anchor used to normalize absolute timing loss.
+    /// Expected accuracy through natural windows with structural offsets neutralized.
     pub timing_reference_accuracy: f64,
     /// Deprecated fitted timing skill output. Production PP no longer fits skill.
     pub timing_skill_played: f64,
@@ -797,12 +781,10 @@ pub(crate) fn calculate_performance_with_model(
     let pp_pattern =
         9.8 * pattern_difficulty.powf(2.2) * variety_multiplier * length_multiplier * multiplier;
 
-    // Timing difficulty: forward prediction at a fixed map-relative probe.
+    // Timing difficulty: relative forward prediction at one fixed timing spread.
     let timing_result = compute_timing_pp(attrs, state, model);
-    // Expected loss is a model-space quantity, not a calibrated PP ratio.
-    let surface_power = timing_result
-        .loss_ratio
-        .powf(TIMING_LOSS_TRANSFER_EXPONENT);
+    // Expected-loss transfer is compressed before entering PP.
+    let surface_power = timing_result.loss_ratio.powf(TIMING_LOSS_TRANSFER_EXPONENT);
 
     // Provisional merged accuracy reward. `performance_proportion` and
     // `acc_multiplier` keep Sunny's calibrated absolute-accuracy response while
@@ -1341,12 +1323,12 @@ struct TimingPpResult {
     reference_accuracy: f64,
 }
 
-/// Evaluate timing difficulty without inferring anything from score counts.
+/// Evaluate relative timing conditions without inferring anything from score counts.
 ///
-/// The map is probed at its own star rating so the scale follows the map while
-/// remaining independent of the submitted score. Only the windows actually in
-/// effect are evaluated. Absolute expected judgment loss is normalized against
-/// one global calibration anchor, never against counterfactual map windows.
+/// Both sides use the same fixed provisional timing spread and structural population.
+/// The played side includes actual windows and measured input-state offsets; the
+/// reference side uses natural windows and neutral offsets. Local star difficulty
+/// never becomes a synthetic player skill.
 fn compute_timing_pp(
     attrs: &SunnyManiaDifficultyAttributes,
     state: SunnyScoreState,
@@ -1357,7 +1339,8 @@ fn compute_timing_pp(
     if total == 0 || attrs.n_objects == 0 || attrs.stars <= 0.0 {
         return TimingPpResult {
             loss_ratio: 1.0,
-            reference_accuracy: 1.0 - TIMING_LOSS_REFERENCE,
+            expected_accuracy: 1.0,
+            reference_accuracy: 1.0,
             ..TimingPpResult::default()
         };
     }
@@ -1369,19 +1352,39 @@ fn compute_timing_pp(
         !per_note_difficulty_disabled(),
     );
 
-    let expected = expected_counts_at_reference_capacity(
+    let expected = expected_counts_at_core_sigma(
         &units,
         &attrs.hit_windows,
         model,
-        attrs.stars,
+        TIMING_TRANSFER_CORE_SIGMA,
     );
     let expected_accuracy = expected.custom_accuracy();
     let expected_loss = (1.0 - expected_accuracy).max(f64::EPSILON);
 
+    let reference_model = ErrorModel {
+        recovery_offset: 0.0,
+        anticipation_offset: 0.0,
+        ..*model
+    };
+    let reference_units = judgement_units(
+        attrs,
+        f64::from(total),
+        &reference_model,
+        !per_note_difficulty_disabled(),
+    );
+    let reference = expected_counts_at_core_sigma(
+        &reference_units,
+        &attrs.map_windows,
+        &reference_model,
+        TIMING_TRANSFER_CORE_SIGMA,
+    );
+    let reference_accuracy = reference.custom_accuracy();
+    let reference_loss = (1.0 - reference_accuracy).max(f64::EPSILON);
+
     TimingPpResult {
-        loss_ratio: expected_loss / TIMING_LOSS_REFERENCE,
+        loss_ratio: expected_loss / reference_loss,
         expected_accuracy,
-        reference_accuracy: 1.0 - TIMING_LOSS_REFERENCE,
+        reference_accuracy,
     }
 }
 
