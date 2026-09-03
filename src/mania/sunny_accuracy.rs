@@ -1,9 +1,9 @@
-//! Expected judgement counts as a function of player skill.
+//! Expected judgement counts as a function of timing spread in milliseconds.
 //!
 //! [`crate::mania::sunny_windows`] says how wide each judgement window is; this module
-//! says how likely a player is to land inside one. Together they form the
-//! "accuracy surface": for a fixed map and mod combination, a family of six
-//! curves giving the expected count of each judgement at every skill level.
+//! integrates the replay-informed timing-error distribution through those windows.
+//! Production pricing uses the score's fitted timing spread as its concrete axis;
+//! star rating is not treated as player skill.
 //!
 //! # Why this exists
 //!
@@ -245,17 +245,19 @@
 //! [`FitQuality::is_plausible`] is the right objective here even though it is the wrong
 //! gate for pricing.
 
-// Production PP uses the fixed-spread transfer. The fitted-skill path remains for
-// diagnostics and calibration experiments, so the module keeps a narrow allowance
-// rather than deleting API those tools still need.
+// Old star-unit inversion remains test-only while its historical calibration tests
+// are migrated. It is deliberately absent from the production API and PP path.
 #![allow(dead_code)]
 
 use crate::mania::sunny_windows::{ManiaHitWindows, ManiaJudgement};
 
 // Timing-model configuration lives here so fitted measurements, gauge choices, and
 // provisional PP-transfer settings cannot be mistaken for one another at call sites.
-const DEFAULT_SIGMA_REF: f64 = 18.0; // Skill-unit gauge; not an empirical timing spread.
-const DEFAULT_SKILL_EXPONENT: f64 = 1.7; // Held value; replay data only bounds it loosely.
+#[cfg(test)]
+const DEFAULT_SIGMA_REF: f64 = 18.0;
+#[cfg(test)]
+const DEFAULT_SKILL_EXPONENT: f64 = 1.7;
+#[cfg(test)]
 const DEFAULT_DIFFICULTY_FLOOR: f64 = 0.6;
 const DEFAULT_LAPSE_WEIGHT: f64 = 0.0296;
 const DEFAULT_LAPSE_RATIO: f64 = 3.339;
@@ -265,29 +267,31 @@ const MEASURED_RECOVERY_OFFSET: f64 = 20.425;
 const MEASURED_RECOVERY_TAU: f64 = 116.68;
 const MEASURED_ANTICIPATION_OFFSET: f64 = -2.517;
 
-/// Provisional core spread used to compare timing conditions, in milliseconds.
+/// Replay-measured irreducible core timing spread, in milliseconds.
 ///
-/// This is deliberately a fixed probe, not a claim about absolute player precision.
-/// A preliminary replay sample measured centered hit-time residuals at 8.52 ms; the
-/// rounded value here must be checked against the broader replay corpus before it is
-/// treated as a population estimate. Hold-duration distributions do not inform it.
-pub(crate) const TIMING_TRANSFER_CORE_SIGMA: f64 = 8.5;
+/// Centered hit-time residuals measured 8.52 ms. Score composition can support a
+/// wider spread, but an all-320 score provides no evidence for a narrower population
+/// spread. Hold-duration distributions do not inform this constant.
+pub(crate) const TIMING_CORE_SIGMA: f64 = 8.5;
 
-/// Compresses the fixed-probe expected-loss ratio before it enters PP.
+/// Compresses the expected-loss transfer ratio before it enters PP.
 ///
 /// Chosen from the multi-user sensitivity report to prevent the raw surface tails
 /// from dominating PP. This is a transfer tuning parameter, not a replay fit.
 pub(crate) const TIMING_LOSS_TRANSFER_EXPONENT: f64 = 0.16;
 
-/// How timing error spreads as a player is pushed past their skill level.
+/// Replay-calibrated timing-distribution shape and structural offsets.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct ErrorModel {
+    #[cfg(test)]
     /// The timing error standard deviation, in ms, of a player whose skill
     /// exactly matches the local difficulty.
     pub sigma_ref: f64,
+    #[cfg(test)]
     /// How sharply error grows once difficulty exceeds skill. Higher values make
     /// the judgement curves knee more steeply.
     pub skill_exponent: f64,
+    #[cfg(test)]
     /// Added to local difficulty so that easy patterns are not perfectly free.
     pub difficulty_floor: f64,
     /// The irreducible timing error, in ms, that remains no matter how far a
@@ -352,6 +356,7 @@ pub struct ErrorModel {
     /// `sqrt((1 - lapse_weight) + lapse_weight * lapse_ratio^2)` ≈ 1.27 at the
     /// default shape, so a measured 13 ms of spread means 10 ms here. Reading a
     /// measured sd straight in would overstate it by 27%.
+    #[cfg(test)]
     pub sigma_floor: f64,
     /// The share of notes hit from the wide "lapse" component rather than the
     /// narrow "locked in" one.
@@ -559,9 +564,13 @@ pub struct ErrorModel {
 impl Default for ErrorModel {
     fn default() -> Self {
         Self {
+            #[cfg(test)]
             sigma_ref: DEFAULT_SIGMA_REF,
+            #[cfg(test)]
             skill_exponent: DEFAULT_SKILL_EXPONENT,
+            #[cfg(test)]
             difficulty_floor: DEFAULT_DIFFICULTY_FLOOR,
+            #[cfg(test)]
             sigma_floor: 0.0,
             lapse_weight: DEFAULT_LAPSE_WEIGHT,
             lapse_ratio: DEFAULT_LAPSE_RATIO,
@@ -618,6 +627,7 @@ impl ErrorModel {
     ///
     /// Returns [`f64::INFINITY`] for non-positive or NaN skill, i.e. a guaranteed
     /// miss.
+    #[cfg(test)]
     pub fn sigma(&self, difficulty: f64, skill: f64) -> f64 {
         // NaN is treated as unplayable rather than propagated, so a bad input
         // cannot poison a whole judgement distribution.
@@ -845,6 +855,7 @@ pub(crate) fn erfc(x: f64) -> f64 {
 
 /// The judgement distribution for a single hit of local difficulty `difficulty`
 /// at player skill `skill`.
+#[cfg(test)]
 pub fn judgement_probabilities(
     windows: &ManiaHitWindows,
     model: &ErrorModel,
@@ -869,6 +880,7 @@ pub fn judgement_probabilities(
 /// release's lateness is a fixed number of milliseconds
 /// ([`ErrorModel::release_mean_offset`]), not a fraction of its spread, so the two
 /// travel independently — see [`JudgementUnit::mean_offset`].
+#[cfg(test)]
 pub fn judgement_probabilities_scaled(
     windows: &ManiaHitWindows,
     model: &ErrorModel,
@@ -1226,6 +1238,7 @@ impl JudgementUnit {
 }
 
 /// Expected judgement counts across every unit at player skill `skill`.
+#[cfg(test)]
 pub fn expected_counts(
     units: &[JudgementUnit],
     windows: &ManiaHitWindows,
@@ -1258,12 +1271,10 @@ pub fn expected_counts(
     ExpectedCounts(totals)
 }
 
-/// Expected counts at a fixed core timing spread in milliseconds.
+/// Expected counts at a supplied core timing spread in milliseconds.
 ///
-/// Unlike [`expected_counts`], local difficulty and latent player skill do not set
-/// the distribution width. This is the production transfer probe: the caller supplies
-/// a provisional spread, while map structure can still alter LN spread and measured
-/// input-state mean offsets.
+/// Local star difficulty does not set the distribution width. Map structure can still
+/// alter LN spread and replay-measured input-state mean offsets.
 pub fn expected_counts_at_core_sigma(
     units: &[JudgementUnit],
     windows: &ManiaHitWindows,
@@ -1293,6 +1304,102 @@ pub fn expected_counts_at_core_sigma(
     ExpectedCounts(totals)
 }
 
+/// Conditional log-likelihood of the five hit judgements at a concrete timing
+/// spread in milliseconds.
+///
+/// Misses are excluded for the same reason as in [`log_likelihood`]: aggregate
+/// score data cannot distinguish a timing-tail miss from a dropped input or read
+/// error. The fitted spread describes the timing of notes that were hit.
+pub fn log_likelihood_at_core_sigma(
+    counts: &[u32; 6],
+    units: &[JudgementUnit],
+    windows: &ManiaHitWindows,
+    model: &ErrorModel,
+    core_sigma: f64,
+) -> f64 {
+    let expected = expected_counts_at_core_sigma(units, windows, model, core_sigma);
+    let timing_total = expected.total() - expected.get(ManiaJudgement::Miss);
+
+    if timing_total <= 0.0 {
+        return f64::NEG_INFINITY;
+    }
+
+    ManiaJudgement::ALL
+        .into_iter()
+        .filter(|&judgement| judgement != ManiaJudgement::Miss)
+        .map(|judgement| {
+            let observed = f64::from(counts[judgement as usize]);
+            let probability = (expected.get(judgement) / timing_total).max(1e-12);
+
+            observed * probability.ln()
+        })
+        .sum()
+}
+
+/// Timing spread in milliseconds that best explains a score's hit-judgement
+/// composition under its played windows and structural timing conditions.
+///
+/// The replay-measured core is the lower edge of the model: poorer hit compositions
+/// add spread, while saturated scores merely provide no evidence of extra spread.
+/// Map stars cannot affect this fit.
+pub fn timing_sigma_for_counts(
+    counts: &[u32; 6],
+    units: &[JudgementUnit],
+    windows: &ManiaHitWindows,
+    model: &ErrorModel,
+) -> f64 {
+    const SIGMA_MAX: f64 = 1_000.0;
+
+    if units.is_empty() || counts.iter().all(|&count| count == 0) {
+        return TIMING_CORE_SIGMA;
+    }
+
+    let evaluate = |log_sigma: f64| {
+        log_likelihood_at_core_sigma(counts, units, windows, model, log_sigma.exp())
+    };
+    let scan_low = TIMING_CORE_SIGMA.ln();
+    let scan_high = SIGMA_MAX.ln();
+    let step = (scan_high - scan_low) / SCAN_POINTS as f64;
+    let mut best_value = f64::NEG_INFINITY;
+    let mut best_index = 0;
+
+    for index in 0..=SCAN_POINTS {
+        let value = evaluate(scan_low + step * index as f64);
+
+        if value > best_value + 1e-9 {
+            best_value = value;
+            best_index = index;
+        }
+    }
+
+    const INV_PHI: f64 = 0.618_033_988_749_895;
+
+    let mut low = scan_low + step * best_index.saturating_sub(1) as f64;
+    let mut high = scan_low + step * (best_index + 1).min(SCAN_POINTS) as f64;
+    let mut c = high - (high - low) * INV_PHI;
+    let mut d = low + (high - low) * INV_PHI;
+    let mut fc = evaluate(c);
+    let mut fd = evaluate(d);
+
+    for _ in 0..GOLDEN_STEPS {
+        if fc > fd {
+            high = d;
+            d = c;
+            fd = fc;
+            c = high - (high - low) * INV_PHI;
+            fc = evaluate(c);
+        } else {
+            low = c;
+            c = d;
+            fc = fd;
+            d = low + (high - low) * INV_PHI;
+            fd = evaluate(d);
+        }
+    }
+
+    ((low + high) / 2.0).exp()
+}
+
 // ---------------------------------------------------------------------------
 // Inversion: score -> skill
 // ---------------------------------------------------------------------------
@@ -1300,7 +1407,9 @@ pub fn expected_counts_at_core_sigma(
 /// The skill range the inversions search, in star-rating units. The upper bound
 /// is far above any real map's difficulty so that near-perfect scores still
 /// bracket.
+#[cfg(test)]
 const SKILL_MIN: f64 = 1e-3;
+#[cfg(test)]
 const SKILL_MAX: f64 = 1e4;
 
 /// Below this skill the conditional fit stops resolving anything, and a returned
@@ -1316,6 +1425,7 @@ const SKILL_MAX: f64 = 1e4;
 ///
 /// Use [`FitQuality::is_identifiable`] rather than comparing against this
 /// directly.
+#[cfg(test)]
 pub const SKILL_IDENTIFIABLE_MIN: f64 = 1.0;
 
 /// Above roughly this multiple of a map's difficulty the surface saturates: every
@@ -1331,10 +1441,12 @@ pub const SKILL_IDENTIFIABLE_MIN: f64 = 1.0;
 /// This is why a fitted skill on an SS is a lower bound. Harmless for pp — every
 /// score up there is an SS and should score the same — but it matters when
 /// calibrating, since such scores cannot pin a skill value.
+#[cfg(test)]
 pub const SKILL_SATURATION_RATIO: f64 = 3.7;
 
 /// How many bisection steps the accuracy inversion takes. 60 halvings of a
 /// ratio-space bracket puts the result well inside f64 noise.
+#[cfg(test)]
 const BISECT_STEPS: u32 = 60;
 
 /// The skill level at which the surface produces the given 305-weighted
@@ -1343,6 +1455,7 @@ const BISECT_STEPS: u32 = 60;
 /// Accuracy rises monotonically with skill, so this bisects. Returns
 /// [`SKILL_MAX`] for an accuracy the surface cannot reach even at the top of the
 /// bracket, which is what a genuine 100% on a trivial map does.
+#[cfg(test)]
 pub fn skill_for_accuracy(
     units: &[JudgementUnit],
     windows: &ManiaHitWindows,
@@ -1386,6 +1499,7 @@ pub fn skill_for_accuracy(
 /// Multinomial up to the constant coefficient, which does not depend on skill and
 /// so drops out of any maximization. Used by [`skill_for_counts`] and available
 /// for fitting [`ErrorModel`] against real scores.
+#[cfg(test)]
 pub fn log_likelihood(
     counts: &[u32; 6],
     units: &[JudgementUnit],
@@ -1476,6 +1590,7 @@ const GOLDEN_STEPS: u32 = 100;
 /// Note that above roughly 25 skill units on a typical map every note is a near
 /// certain 320, so the likelihood flattens and the returned value should be read
 /// as "at least this skilled" rather than a point estimate.
+#[cfg(test)]
 pub fn skill_for_counts(
     counts: &[u32; 6],
     units: &[JudgementUnit],
@@ -1543,6 +1658,7 @@ pub fn skill_for_counts(
 
 /// How well a score's judgement vector matches what the surface predicts.
 #[derive(Copy, Clone, Debug, PartialEq)]
+#[cfg(test)]
 pub struct FitQuality {
     /// The skill the fit settled on.
     pub skill: f64,
@@ -1610,6 +1726,7 @@ pub struct FitQuality {
     pub g_per_judgement: f64,
 }
 
+#[cfg(test)]
 impl FitQuality {
     /// Whether the score's *timing shape* is broadly consistent with the surface,
     /// and so whether [`Self::skill`] can be trusted.
@@ -1644,6 +1761,7 @@ impl FitQuality {
 /// Always prefer this over [`skill_for_counts`] when the number feeds pp. A skill
 /// estimate on its own gives no indication that the score was nothing like what
 /// the model expects, and such scores do occur — see the module docs.
+#[cfg(test)]
 pub fn fit_with_quality(
     counts: &[u32; 6],
     units: &[JudgementUnit],
@@ -1954,6 +2072,48 @@ mod tests {
         assert_eq!(model.recovery_mean_offset(f64::INFINITY), 0.0);
         assert_eq!(model.recovery_mean_offset(f64::NAN), 0.0);
         assert_eq!(model.recovery_mean_offset(-1.0), 16.81);
+    }
+
+    #[test]
+    fn direct_sigma_fit_recovers_a_known_spread() {
+        let model = ErrorModel::default();
+        let windows = ManiaHitWindows {
+            perfect: 16.5,
+            great: 40.5,
+            good: 73.5,
+            ok: 103.5,
+            meh: 127.5,
+            miss: 164.5,
+        };
+        let units = [JudgementUnit::repeated(6.0, 100_000.0)];
+        let expected = expected_counts_at_core_sigma(&units, &windows, &model, 12.0);
+        let counts = expected.0.map(|count| count.round() as u32);
+        let fitted = timing_sigma_for_counts(&counts, &units, &windows, &model);
+
+        assert!((fitted - 12.0).abs() < 0.05, "fitted sigma was {fitted}");
+    }
+
+    #[test]
+    fn worse_hit_composition_fits_a_wider_sigma() {
+        let model = ErrorModel::default();
+        let windows = ManiaHitWindows {
+            perfect: 16.5,
+            great: 40.5,
+            good: 73.5,
+            ok: 103.5,
+            meh: 127.5,
+            miss: 164.5,
+        };
+        let units = [JudgementUnit::repeated(6.0, 10_000.0)];
+        let precise = [9_500, 450, 40, 8, 2, 0];
+        let rough = [5_000, 3_000, 1_200, 500, 300, 0];
+        let precise_sigma = timing_sigma_for_counts(&precise, &units, &windows, &model);
+        let rough_sigma = timing_sigma_for_counts(&rough, &units, &windows, &model);
+
+        assert!(
+            rough_sigma > precise_sigma,
+            "rough {rough_sigma} ms should exceed precise {precise_sigma} ms"
+        );
     }
 
     #[test]

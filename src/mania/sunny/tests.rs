@@ -1,4 +1,7 @@
 use super::*;
+// Historical calibration reports retained to compare the retired star-unit model.
+// Production code neither imports nor calls this path.
+use crate::mania::sunny_accuracy::fit_with_quality;
 use rosu_mods::{GameMod, GameMods as LazerMods};
 
 mod recovery;
@@ -614,7 +617,7 @@ fn a_missing_per_note_distribution_falls_back_to_the_uniform_list() {
         n50: 0,
         misses: 0,
     };
-    let scalar = window_scalar_with_model(&stripped, state, &ErrorModel::default());
+    let scalar = timing_loss_ratio_with_model(&stripped, state, &ErrorModel::default());
 
     assert!(
         scalar.is_finite() && scalar > 0.0,
@@ -874,8 +877,6 @@ fn timing_value_does_not_fit_the_observed_judgement_mix() {
         clean.timing_expected_accuracy,
         rough.timing_expected_accuracy
     );
-    assert_eq!(clean.timing_skill_played, 0.0);
-    assert_eq!(rough.timing_skill_played, 0.0);
 }
 
 /// [`REFERENCE_WINDOWS`] has to be a hand-written literal to stay `const`, so it
@@ -3185,6 +3186,8 @@ struct MultiPriced {
     variety_multiplier: f64,
     length_multiplier: f64,
     scalar: f64,
+    timing_sigma: f64,
+    // Retired-model fields below are retained only for historical calibration tests.
     skill: f64,
     g_timing: f64,
     plausible: bool,
@@ -3855,6 +3858,7 @@ fn load_multiuser() -> Vec<MultiPriced> {
             variety_multiplier: perf.variety_multiplier,
             length_multiplier: perf.length_multiplier,
             scalar: perf.window_scalar,
+            timing_sigma: perf.timing_core_sigma,
             skill: fit.skill,
             g_timing: fit.g_timing,
             plausible: fit.is_plausible(),
@@ -3968,6 +3972,7 @@ fn load_ladder(path: &str) -> Vec<MultiPriced> {
             variety_multiplier: perf.variety_multiplier,
             length_multiplier: perf.length_multiplier,
             scalar: perf.window_scalar,
+            timing_sigma: perf.timing_core_sigma,
             skill: fit.skill,
             g_timing: fit.g_timing,
             plausible: fit.is_plausible(),
@@ -4041,8 +4046,8 @@ fn multiuser_report() {
             "currentPP",
             "d%",
             "scalar",
-            "skill",
-            "plaus"
+            "sigma",
+            "ms"
         );
 
         for r in &rows {
@@ -4076,8 +4081,8 @@ fn multiuser_report() {
                 r.current_pp,
                 delta,
                 r.scalar,
-                r.skill,
-                r.plausible
+                r.timing_sigma,
+                ""
             );
         }
 
@@ -4421,151 +4426,6 @@ fn multiuser_report() {
         );
     }
 
-    let mut g: Vec<f64> = all.iter().map(|r| r.g_timing).collect();
-    g.sort_by(f64::total_cmp);
-    println!(
-        "\nfit quality: g_timing median {:.1} p90 {:.1}, plausible {}/{}",
-        g[g.len() / 2],
-        g[g.len() * 9 / 10],
-        all.iter().filter(|r| r.plausible).count(),
-        all.len()
-    );
-
-    // Fit quality is supplemental evidence, not a pricing gate. Report the full
-    // distribution and threshold sensitivity so the arbitrary `g < 30` label does
-    // not get mistaken for ground truth, then split it along axes the model actually
-    // sees. This is specifically diagnostic: none of these cohorts feed pp.
-    let report_fit = |label: &str, rows: &[&MultiPriced]| {
-        if rows.is_empty() {
-            return;
-        }
-
-        let mut values: Vec<f64> = rows
-            .iter()
-            .map(|row| row.g_timing)
-            .filter(|value| value.is_finite())
-            .collect();
-        values.sort_by(f64::total_cmp);
-
-        if values.is_empty() {
-            return;
-        }
-
-        let below = |threshold: f64| values.partition_point(|value| *value < threshold);
-        println!(
-            "  {label:<22} n={:<4} p50 {:>7.1} p75 {:>7.1} p90 {:>7.1}  \
-                 g<15 {:>4}  g<30 {:>4}  g<60 {:>4}",
-            values.len(),
-            values[values.len() / 2],
-            values[values.len() * 3 / 4],
-            values[values.len() * 9 / 10],
-            below(15.0),
-            below(30.0),
-            below(60.0),
-        );
-    };
-
-    println!("\nfit-quality diagnostics (supplemental; lower g_timing is better):");
-    report_fit("all", &all);
-
-    println!("  by score/window mode:");
-    for (label, pred) in [
-        ("EZ", (|r: &&MultiPriced| r.row.mods.contains("EZ")) as Pred),
-        ("HR", |r: &&MultiPriced| r.row.mods.contains("HR")),
-        ("stable V2", |r: &&MultiPriced| r.row.mods.contains("V2")),
-        ("stable V1", |r: &&MultiPriced| !r.row.mods.contains("V2")),
-        ("DT/NC", |r: &&MultiPriced| {
-            r.row.mods.contains("DT") || r.row.mods.contains("NC")
-        }),
-        ("NM/rate 1", |r: &&MultiPriced| {
-            !r.row.mods.contains("DT")
-                && !r.row.mods.contains("NC")
-                && !r.row.mods.contains("HT")
-                && !r.row.mods.contains("EZ")
-                && !r.row.mods.contains("HR")
-        }),
-    ] {
-        report_fit(label, &all.iter().copied().filter(pred).collect::<Vec<_>>());
-    }
-
-    println!("  by structural and performance bands:");
-    for keys in [4_u32, 6, 7] {
-        report_fit(
-            &format!("{keys}K"),
-            &all.iter()
-                .copied()
-                .filter(|row| row.row.keys == keys)
-                .collect::<Vec<_>>(),
-        );
-    }
-    for (label, lo, hi) in [
-        ("OD <7", 0.0, 7.0),
-        ("OD 7-8", 7.0, 8.0),
-        ("OD >=8", 8.0, f64::INFINITY),
-    ] {
-        report_fit(
-            label,
-            &all.iter()
-                .copied()
-                .filter(|row| f64::from(row.od) >= lo && f64::from(row.od) < hi)
-                .collect::<Vec<_>>(),
-        );
-    }
-    for (label, lo, hi) in [
-        ("LN <5%", 0.0, 0.05),
-        ("LN 5-30%", 0.05, 0.30),
-        ("LN 30-60%", 0.30, 0.60),
-        ("LN >=60%", 0.60, 1.01),
-        ("acc <95%", 0.0, 95.0),
-        ("acc 95-98%", 95.0, 98.0),
-        ("acc >=98%", 98.0, f64::INFINITY),
-        ("skill <7", 0.0, 7.0),
-        ("skill 7-9", 7.0, 9.0),
-        ("skill >=9", 9.0, f64::INFINITY),
-    ] {
-        report_fit(
-            label,
-            &all.iter()
-                .copied()
-                .filter(|row| {
-                    let value = if label.starts_with("LN") {
-                        row.ln_fraction
-                    } else if label.starts_with("acc") {
-                        row.row.acc
-                    } else {
-                        row.skill
-                    };
-                    value >= lo && value < hi
-                })
-                .collect::<Vec<_>>(),
-        );
-    }
-
-    let mut worst = all.clone();
-    worst.sort_by(|a, b| b.g_timing.total_cmp(&a.g_timing));
-    println!("\nworst 20 timing-shape fits (diagnostic only):");
-    println!(
-        "  {:>6} {:>8} {:>9} {:>2} {:>4} {:>5} {:>6} {:>6} {:>8}",
-        "uid", "map", "mods", "k", "od", "LN%", "acc%", "skill", "g_timing"
-    );
-    for row in worst.into_iter().take(20) {
-        println!(
-            "  {:>6} {:>8} {:>9} {:>2} {:>4.1} {:>5.0} {:>6.2} {:>6.2} {:>8.1}",
-            row.row.uid,
-            row.row.map_id,
-            if row.row.mods.is_empty() {
-                "NM"
-            } else {
-                &row.row.mods
-            },
-            row.row.keys,
-            row.od,
-            row.ln_fraction * 100.0,
-            row.row.acc,
-            row.skill,
-            row.g_timing,
-        );
-    }
 }
 
 /// Reports how [`ErrorModel::release_mean_offset`] moves pricing under the fixed
@@ -5628,7 +5488,6 @@ fn summarise_group(label: &str, rows: &[&MultiPriced]) {
     let current: f64 = rows.iter().map(|r| r.current_pp).sum();
     let live: f64 = rows.iter().map(|r| r.row.live_pp).sum();
     let mean_scalar = rows.iter().map(|r| r.scalar).sum::<f64>() / n;
-    let plausible = rows.iter().filter(|r| r.plausible).count();
 
     // Comparing current against live (the sunny reference from fixtures).
     let mean_delta = rows
@@ -5648,19 +5507,11 @@ fn summarise_group(label: &str, rows: &[&MultiPriced]) {
         mean_delta
     );
 
-    // Median rather than mean g_timing: the statistic has a long right tail on
-    // real scores, so a handful of unexplainable plays would otherwise set the
-    // figure for the whole group.
-    let mut gs: Vec<f64> = rows.iter().map(|r| r.g_timing).collect();
-    gs.sort_by(f64::total_cmp);
-    let median_g = gs[gs.len() / 2];
-
     let n_rows = rows.len();
     let sum_delta = (current / live - 1.0) * 100.0;
     println!(
         "  {label}: n={n_rows} mean scalar {mean_scalar:.4}  mean dPP {mean_delta:+.2}%  \
-             sum {live:.0} -> {current:.0} ({sum_delta:+.2}%)  plausible {plausible}/{n_rows}  \
-             med g {median_g:.1}{live_note}"
+             sum {live:.0} -> {current:.0} ({sum_delta:+.2}%){live_note}"
     );
 }
 

@@ -21,11 +21,9 @@ use crate::model::{
 };
 use rosu_mods::{Acronym, GameMods};
 
-#[cfg(test)]
-use crate::mania::sunny_accuracy::fit_with_quality;
 use crate::mania::sunny_accuracy::{
-    expected_counts_at_core_sigma, ErrorModel, JudgementUnit, LN_DURATION_BUCKETS,
-    TIMING_LOSS_TRANSFER_EXPONENT, TIMING_TRANSFER_CORE_SIGMA,
+    expected_counts_at_core_sigma, timing_sigma_for_counts, ErrorModel, JudgementUnit,
+    LN_DURATION_BUCKETS, TIMING_CORE_SIGMA, TIMING_LOSS_TRANSFER_EXPONENT,
 };
 use crate::mania::sunny_windows::{hit_windows, ManiaHitWindows};
 
@@ -651,10 +649,8 @@ pub struct SunnyManiaPerformanceAttributes {
     pub timing_expected_accuracy: f64,
     /// Expected accuracy through natural windows with structural offsets neutralized.
     pub timing_reference_accuracy: f64,
-    /// Deprecated fitted timing skill output. Production PP no longer fits skill.
-    pub timing_skill_played: f64,
-    /// Deprecated fitted timing skill output. Production PP no longer fits skill.
-    pub timing_skill_baseline: f64,
+    /// Score-conditioned timing spread used for the relative transfer, in milliseconds.
+    pub timing_core_sigma: f64,
 }
 
 /// Score state required for the performance calculation.
@@ -781,7 +777,7 @@ pub(crate) fn calculate_performance_with_model(
     let pp_pattern =
         9.8 * pattern_difficulty.powf(2.2) * variety_multiplier * length_multiplier * multiplier;
 
-    // Timing difficulty: relative forward prediction at one fixed timing spread.
+    // Timing difficulty: score-conditioned relative transfer at one fitted spread.
     let timing_result = compute_timing_pp(attrs, state, model);
     // Expected-loss transfer is compressed before entering PP.
     let surface_power = timing_result.loss_ratio.powf(TIMING_LOSS_TRANSFER_EXPONENT);
@@ -814,8 +810,7 @@ pub(crate) fn calculate_performance_with_model(
         pp_timing,
         timing_expected_accuracy: timing_result.expected_accuracy,
         timing_reference_accuracy: timing_result.reference_accuracy,
-        timing_skill_played: 0.0,
-        timing_skill_baseline: 0.0,
+        timing_core_sigma: timing_result.core_sigma,
     }
 }
 
@@ -1228,91 +1223,13 @@ fn units_from_difficulty_bins(
     units
 }
 
-/// How much the windows a score was played under change what it is worth.
-///
-/// This is where mods get priced, and it is the whole point of widening the windows
-/// *before* grading the score. The same judgement counts are fitted twice: once
-/// against the windows actually in effect, once against [`reference_windows`]. A
-/// player who delivers a given 320 count through wider `EZ` windows demonstrably
-/// hit less precisely, so the first fit returns a lower skill and the ratio falls
-/// below 1. Nothing here inspects the mod list.
-///
-/// Deliberately *not* gated on [`ManiaFitQuality::is_plausible`]. The absolute fit is
-/// still imperfect on many real scores even after the error model was given a proper
-/// tail, but that error is largely common to both fits and so divides out of the
-/// ratio. Gating on it made pricing bimodal: whichever scores happened to fit got
-/// priced and the rest silently kept their unmodified value, which is a worse failure
-/// than a slightly mis-sized adjustment. `is_plausible` stays useful for calibration,
-/// where the absolute fit is the thing under test.
-///
-/// Worth knowing how little the shape calibration moved this: replacing the single
-/// normal with the fitted two-component mixture halved mean `g_timing` across the 20
-/// real scores (101.6 to 51.6) while the mean `EZ` scalar shifted only from 0.8256 to
-/// 0.8273. That is the design working as intended — the scalar is a ratio of two fits
-/// that share a shape error, so it is far more robust than the absolute fit is. It
-/// also means the mod response is set by `skill_exponent` and the windows, not by the
-/// tail, and it is why the shape could be fitted without disturbing pricing.
-///
-/// Returns 1.0 only when there is nothing to measure: an empty score, or a fit that
-/// did not produce a usable positive skill on both sides.
-///
-/// The `model` is explicit so a calibration candidate can be priced against the
-/// shipped default on the same score. Production passes [`ErrorModel::default`] via
-/// [`calculate_performance`]; the A/B report is the only caller that passes anything
-/// else.
 #[cfg(test)]
-fn window_scalar_with_model(
+fn timing_loss_ratio_with_model(
     attrs: &SunnyManiaDifficultyAttributes,
     state: SunnyScoreState,
     model: &ErrorModel,
 ) -> f64 {
-    let total = state.total_hits();
-
-    if total == 0 || attrs.n_objects == 0 || attrs.stars <= 0.0 {
-        return 1.0;
-    }
-
-    let counts = [
-        state.n320,
-        state.n300,
-        state.n200,
-        state.n100,
-        state.n50,
-        state.misses,
-    ];
-
-    let units = judgement_units(
-        attrs,
-        f64::from(total),
-        model,
-        !per_note_difficulty_disabled(),
-    );
-
-    let played = fit_with_quality(&counts, &units, &attrs.hit_windows, model);
-    let baseline_model = ErrorModel {
-        recovery_offset: 0.0,
-        anticipation_offset: 0.0,
-        ..*model
-    };
-    // Keep the structural population identical on both sides. Rebuilding units
-    // from mod-affected cached bins would mix SR changes into the window surface.
-    let baseline_units = units.clone();
-    let baseline = fit_with_quality(
-        &counts,
-        &baseline_units,
-        &attrs.hit_windows,
-        &baseline_model,
-    );
-
-    if played.skill <= 0.0 || baseline.skill <= 0.0 {
-        return 1.0;
-    }
-
-    // The baseline retains established local-difficulty and LN structure but excludes
-    // the experimental recovery channel. Low OD is not charged merely for being below
-    // OD8, EZ/HR still act through the played windows, and new input-state/oracle units
-    // appear only on the played side instead of cancelling themselves.
-    played.skill / baseline.skill
+    compute_timing_pp(attrs, state, model).loss_ratio
 }
 
 /// Result of timing pp calculation with component breakdown.
@@ -1321,14 +1238,16 @@ struct TimingPpResult {
     loss_ratio: f64,
     expected_accuracy: f64,
     reference_accuracy: f64,
+    core_sigma: f64,
 }
 
-/// Evaluate relative timing conditions without inferring anything from score counts.
+/// Evaluate a score-conditioned relative timing transfer on a millisecond axis.
 ///
-/// Both sides use the same fixed provisional timing spread and structural population.
-/// The played side includes actual windows and measured input-state offsets; the
-/// reference side uses natural windows and neutral offsets. Local star difficulty
-/// never becomes a synthetic player skill.
+/// The score's hit-judgement composition determines one concrete core spread under
+/// played conditions. Both sides then use that same spread and structural population:
+/// the played side includes actual windows and measured input-state offsets, while the
+/// reference side uses natural windows and neutral offsets. Local star difficulty never
+/// becomes a synthetic player skill.
 fn compute_timing_pp(
     attrs: &SunnyManiaDifficultyAttributes,
     state: SunnyScoreState,
@@ -1341,6 +1260,7 @@ fn compute_timing_pp(
             loss_ratio: 1.0,
             expected_accuracy: 1.0,
             reference_accuracy: 1.0,
+            core_sigma: TIMING_CORE_SIGMA,
             ..TimingPpResult::default()
         };
     }
@@ -1351,12 +1271,21 @@ fn compute_timing_pp(
         model,
         !per_note_difficulty_disabled(),
     );
+    let counts = [
+        state.n320,
+        state.n300,
+        state.n200,
+        state.n100,
+        state.n50,
+        state.misses,
+    ];
+    let core_sigma = timing_sigma_for_counts(&counts, &units, &attrs.hit_windows, model);
 
     let expected = expected_counts_at_core_sigma(
         &units,
         &attrs.hit_windows,
         model,
-        TIMING_TRANSFER_CORE_SIGMA,
+        core_sigma,
     );
     let expected_accuracy = expected.custom_accuracy();
     let expected_loss = (1.0 - expected_accuracy).max(f64::EPSILON);
@@ -1376,7 +1305,7 @@ fn compute_timing_pp(
         &reference_units,
         &attrs.map_windows,
         &reference_model,
-        TIMING_TRANSFER_CORE_SIGMA,
+        core_sigma,
     );
     let reference_accuracy = reference.custom_accuracy();
     let reference_loss = (1.0 - reference_accuracy).max(f64::EPSILON);
@@ -1385,6 +1314,7 @@ fn compute_timing_pp(
         loss_ratio: expected_loss / reference_loss,
         expected_accuracy,
         reference_accuracy,
+        core_sigma,
     }
 }
 
