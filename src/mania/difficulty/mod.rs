@@ -23,6 +23,7 @@ mod evaluators;
 pub mod gradual;
 mod object;
 mod rebirth;
+pub(crate) mod shared;
 mod skills;
 
 pub fn difficulty(

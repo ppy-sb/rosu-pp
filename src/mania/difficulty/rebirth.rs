@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use crate::{
@@ -9,18 +8,7 @@ use crate::{
     mania::sunny_windows::{ManiaHitWindows, effective_windows},
 };
 
-#[derive(Clone, Copy, Debug)]
-struct Note {
-    column: usize,
-    head: f64,
-    tail: Option<f64>,
-}
-
-impl Note {
-    fn tail_or_head(self) -> f64 {
-        self.tail.unwrap_or(self.head)
-    }
-}
+use super::shared::*;
 
 /// The result of the rebirth difficulty calculation, containing the star
 /// rating as well as the additional measures required for performance
@@ -287,152 +275,6 @@ fn build_notes(clock_rate: f64, objects: impl IntoIterator<Item = ManiaObject>) 
         .collect()
 }
 
-fn compare_notes(a: &Note, b: &Note) -> Ordering {
-    a.head
-        .total_cmp(&b.head)
-        .then_with(|| a.column.cmp(&b.column))
-}
-
-/// Convert a GREAT hit window to hit leniency.
-/// This is the same formula used in sunny.rs.
-fn hit_leniency_from_window(great_window: f64) -> f64 {
-    let x = 0.3 * (great_window / 500.0).sqrt();
-    x.min(0.6 * (x - 0.09) + 0.09)
-}
-
-fn get_corners(t_end: f64, notes: &[Note]) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-    let mut base = Vec::new();
-    let mut awkwardness = Vec::new();
-
-    for note in notes {
-        let boundaries = [Some(note.head), note.tail];
-
-        for boundary in boundaries.into_iter().flatten() {
-            base.extend([boundary, boundary + 501.0, boundary - 499.0, boundary + 1.0]);
-            awkwardness.extend([boundary, boundary + 1000.0, boundary - 1000.0]);
-        }
-    }
-
-    base.extend([0.0, t_end]);
-    awkwardness.extend([0.0, t_end]);
-
-    sort_corners(&mut base, t_end);
-    sort_corners(&mut awkwardness, t_end);
-
-    let mut all = Vec::with_capacity(base.len() + awkwardness.len());
-    all.extend_from_slice(&base);
-    all.extend_from_slice(&awkwardness);
-    sort_corners(&mut all, t_end);
-
-    (all, base, awkwardness)
-}
-
-fn sort_corners(corners: &mut Vec<f64>, t_end: f64) {
-    corners.retain(|&corner| (0.0..=t_end).contains(&corner));
-    corners.sort_by(f64::total_cmp);
-    corners.dedup_by(|a, b| a.total_cmp(b).is_eq());
-}
-
-fn cumulative_sum(x: &[f64], f: &[f64]) -> Vec<f64> {
-    let mut cumulative = vec![0.0; x.len()];
-
-    for i in 1..x.len() {
-        cumulative[i] = cumulative[i - 1] + f[i - 1] * (x[i] - x[i - 1]);
-    }
-
-    cumulative
-}
-
-fn query_cumsum(q: f64, x: &[f64], cumulative: &[f64], f: &[f64]) -> f64 {
-    let Some((&first, &last)) = x.first().zip(x.last()) else {
-        return 0.0;
-    };
-
-    if q <= first {
-        return 0.0;
-    }
-
-    if q >= last {
-        return cumulative.last().copied().unwrap_or(0.0);
-    }
-
-    let i = x.partition_point(|&value| value < q).saturating_sub(1);
-
-    cumulative[i] + f[i] * (q - x[i])
-}
-
-fn smooth_on_corners(x: &[f64], f: &[f64], window: f64, scale: f64, average: bool) -> Vec<f64> {
-    let Some((&first, &last)) = x.first().zip(x.last()) else {
-        return Vec::new();
-    };
-
-    let cumulative = cumulative_sum(x, f);
-
-    x.iter()
-        .map(|&s| {
-            let a = (s - window).max(first);
-            let b = (s + window).min(last);
-            let val = query_cumsum(b, x, &cumulative, f) - query_cumsum(a, x, &cumulative, f);
-
-            if average {
-                if b > a { val / (b - a) } else { 0.0 }
-            } else {
-                scale * val
-            }
-        })
-        .collect()
-}
-
-fn interp_values(new_x: &[f64], old_x: &[f64], old_vals: &[f64]) -> Vec<f64> {
-    if old_x.is_empty() || old_vals.is_empty() {
-        return vec![0.0; new_x.len()];
-    }
-
-    new_x
-        .iter()
-        .map(|&x| {
-            if x <= old_x[0] {
-                return old_vals[0];
-            }
-
-            let last = old_x.len() - 1;
-
-            if x >= old_x[last] {
-                return old_vals[last];
-            }
-
-            let right = old_x.partition_point(|&value| value < x);
-            let left = right - 1;
-            let width = old_x[right] - old_x[left];
-
-            if width == 0.0 {
-                old_vals[left]
-            } else {
-                let t = (x - old_x[left]) / width;
-                old_vals[left] + (old_vals[right] - old_vals[left]) * t
-            }
-        })
-        .collect()
-}
-
-fn step_interp(new_x: &[f64], old_x: &[f64], old_vals: &[f64]) -> Vec<f64> {
-    if old_x.is_empty() || old_vals.is_empty() {
-        return vec![0.0; new_x.len()];
-    }
-
-    new_x
-        .iter()
-        .map(|&x| {
-            let idx = old_x
-                .partition_point(|&value| value <= x)
-                .saturating_sub(1)
-                .min(old_vals.len() - 1);
-
-            old_vals[idx]
-        })
-        .collect()
-}
-
 fn get_key_usage(data: &RebirthData) -> Vec<Vec<bool>> {
     let mut key_usage = vec![vec![false; data.base_corners.len()]; data.total_columns];
 
@@ -603,7 +445,7 @@ fn compute_xbar(data: &RebirthData, active_columns: &[Vec<usize>]) -> Vec<f64> {
     let hit_leniency = data.hit_leniency();
 
     for pair_column in 0..=data.total_columns {
-        let notes_in_pair = notes_in_pair(data, pair_column);
+        let notes_in_pair = notes_in_pair(&data.notes_by_column, data.total_columns, pair_column);
 
         for pair in notes_in_pair.windows(2) {
             let start = pair[0].head;
@@ -1194,68 +1036,6 @@ fn rao_quadratic_entropy_log(values: &[i64], log_iterations: u32) -> f64 {
     }
 
     q
-}
-
-fn notes_in_pair(data: &RebirthData, pair_column: usize) -> Vec<Note> {
-    match pair_column {
-        0 => data.notes_by_column.first().cloned().unwrap_or_default(),
-        column if column == data.total_columns => {
-            data.notes_by_column.last().cloned().unwrap_or_default()
-        }
-        column => {
-            let mut notes = Vec::with_capacity(
-                data.notes_by_column[column - 1].len() + data.notes_by_column[column].len(),
-            );
-            notes.extend_from_slice(&data.notes_by_column[column - 1]);
-            notes.extend_from_slice(&data.notes_by_column[column]);
-            notes.sort_by(compare_notes);
-            notes
-        }
-    }
-}
-
-fn find_next_note_in_column(note: Note, notes: &[Note]) -> Option<Note> {
-    let idx = notes.partition_point(|candidate| candidate.head < note.head);
-
-    notes.get(idx + 1).copied()
-}
-
-fn active_columns_contains(active_columns: &[Vec<usize>], idx: usize, column: isize) -> bool {
-    usize::try_from(column).is_ok_and(|column| active_columns[idx].contains(&column))
-}
-
-fn lower_bound(values: &[f64], target: f64) -> usize {
-    values.partition_point(|&value| value < target)
-}
-
-fn upper_bound(values: &[f64], target: f64) -> usize {
-    values.partition_point(|&value| value <= target)
-}
-
-fn jack_nerfer(delta: f64) -> f64 {
-    1.0 - 7e-5 * (0.15 + (delta - 0.08).abs()).powi(-4)
-}
-
-fn stream_booster(delta: f64) -> f64 {
-    let bpm = 7.5 / delta;
-
-    if (160.0..360.0).contains(&bpm) {
-        1.0 + 1.7e-7 * (bpm - 160.0) * (bpm - 360.0).powi(2)
-    } else {
-        1.0
-    }
-}
-
-fn rescale_high(sr: f64) -> f64 {
-    if sr <= 9.0 {
-        sr
-    } else {
-        9.0 + (sr - 9.0) / 1.2
-    }
-}
-
-fn logistic(value: f64, midpoint: f64, multiplier: f64) -> f64 {
-    1.0 / (1.0 + (-multiplier * (value - midpoint)).exp())
 }
 
 #[cfg(test)]
