@@ -597,7 +597,7 @@ pub struct SunnyManiaDifficultyAttributes {
     /// How many of those hit objects are long notes.
     ///
     /// Read straight off the map, so it is structural input to the judgement model
-    /// rather than anything inferred from a score. [`window_scalar`] uses it to split
+    /// rather than anything inferred from a score. The timing model uses it to split
     /// the map into rice and LN populations, since a ScoreV1 long note is judged on
     /// the sum of two offsets and so carries more timing spread than a press — see
     /// [`crate::mania::sunny_accuracy::ln_sigma_scale`].
@@ -673,13 +673,6 @@ pub struct SunnyManiaPerformanceAttributes {
     pub acc_multiplier: f64,
     /// The length multiplier applied to the difficulty portion.
     pub length_multiplier: f64,
-    /// How much the judgement windows in effect changed the score's value.
-    ///
-    /// Below 1 when the score was graded through windows wider than the map's natural
-    /// windows, which is how `EZ` is priced without a mod-specific factor. Exactly 1
-    /// when both sides use the same windows and input-state model, or there was
-    /// nothing to measure. See [`window_scalar`].
-    // pub window_scalar: f64,
     /// Accuracy-neutral PP contribution from Sunny's pattern calculation.
     pub xxy_pp_pattern: f64,
     /// Reference adjustment from Sunny's accuracy proportion and accuracy scalar.
