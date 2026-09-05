@@ -30,8 +30,8 @@
 //! differences genuinely do not exist in gameplay. This is why `DT` barely
 //! moves mania windows at all.
 
-// Nothing consumes this module yet; it is the prerequisite for making the PP
-// stage window-aware. Remove once the accuracy model is wired up.
+// The difficulty stage consumes the GREAT window; the complete set is retained
+// here for the accuracy model and its tests.
 
 use crate::model::beatmap::Beatmap;
 use rosu_mods::{Acronym, GameMods};
@@ -318,39 +318,6 @@ fn classic_windows(od: f64, is_convert: bool) -> ManiaHitWindows {
             meh: 121.0 + 3.0 * anti_od,
             miss: 158.0 + 3.0 * anti_od,
         }
-    }
-}
-
-/// Reconstruct a window set from a GREAT window alone.
-///
-/// Needed on the round-trip path: attributes handed back from JS carry
-/// `greatHitWindow` but not the full set, and the performance stage needs the set
-/// to price mods. The classic non-convert scheme offsets every window from GREAT by
-/// a fixed amount, so inverting it is exact for that scheme — and the offsets hold
-/// under `EZ`/`HR` only approximately, since those scale rather than shift.
-///
-/// PERFECT is the one that cannot be recovered: it is a flat 16.5 regardless of OD,
-/// so a widened GREAT under `EZ` leaves no trace in it. It is scaled by the same
-/// ratio as GREAT here, which is right under `EZ`/`HR` and a no-op otherwise.
-///
-/// Prefer passing the real window set. This exists so a cached-attributes call
-/// does not silently price mods differently from a from-beatmap one.
-pub fn windows_from_great(great: f64) -> ManiaHitWindows {
-    const REFERENCE_GREAT: f64 = 40.5;
-
-    if great <= 0.0 {
-        return ManiaHitWindows::default();
-    }
-
-    let ratio = great / REFERENCE_GREAT;
-
-    ManiaHitWindows {
-        perfect: 16.5 * ratio,
-        great,
-        good: great + 36.0,
-        ok: great + 66.0,
-        meh: great + 87.0,
-        miss: great + 124.0,
     }
 }
 

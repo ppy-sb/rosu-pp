@@ -2490,7 +2490,7 @@ fn ladder_report() {
 #[ignore = "writes CSV for plotting rather than asserting"]
 fn surface_dump() {
     use crate::mania::sunny_accuracy::expected_counts;
-    use crate::mania::sunny_windows::{ManiaJudgement, windows_from_great};
+    use crate::mania::sunny_windows::ManiaJudgement;
     use std::fmt::Write as _;
 
     let model = ErrorModel::default();
@@ -2714,7 +2714,14 @@ fn surface_dump() {
         } else if (great - 40.5).abs() < 1e-9 {
             REFERENCE_WINDOWS
         } else {
-            windows_from_great(great)
+            ManiaHitWindows {
+                perfect: 16.5,
+                great,
+                good: 76.0,
+                ok: 106.0,
+                meh: 127.0,
+                miss: 164.0,
+            }
         };
 
         for &skill in &skills {
@@ -3195,7 +3202,14 @@ fn sigma_floor_sweep() {
     // The ceiling a floor imposes, which is the constraint that killed 10 ms.
     // Independent of skill: it is what the model allows at infinite skill.
     println!("\nmax reachable 320 share at infinite skill (OD8, 16ms PERFECT):");
-    let windows = crate::mania::sunny_windows::windows_from_great(40.0);
+    let windows = crate::mania::sunny_windows::ManiaHitWindows {
+        perfect: 16.5,
+        great: 40.0,
+        good: 76.0,
+        ok: 106.0,
+        meh: 127.0,
+        miss: 164.0,
+    };
     for floor in [0.0, 1.0, 2.0, 3.0, 5.0, 10.0] {
         let model = ErrorModel {
             sigma_floor: floor,
