@@ -658,6 +658,17 @@ pub struct SunnyManiaDifficultyAttributes {
     /// `n_objects + n_long_notes`. Verified against 143 live scores — every V2 score
     /// totalled `notes + LN`, and every V1 score bar one totalled `notes`.
     pub ln_judged_as_one: bool,
+    /// Map-based timing difficulty factor computed from window tightness and structure.
+    ///
+    /// This is a PP multiplier derived from the map's inherent accuracy difficulty,
+    /// independent of any particular score. Factors in: window tightness (OD),
+    /// expected baseline accuracy, LN structure.
+    ///
+    /// Range roughly [0.85, 1.15] where:
+    /// - Low OD with easy structure → ~0.85-0.95 (easier to acc)
+    /// - High OD with complex LN → ~1.05-1.15 (harder to acc)
+    /// - Typical maps → ~1.0
+    pub timing_difficulty_factor: f64,
 }
 
 /// The result of the sunny performance calculation.
@@ -762,6 +773,7 @@ pub fn calculate(
         timing_expected_accuracy: 1.0,
         timing_reference_accuracy: 1.0,
         ln_judged_as_one: classic,
+        timing_difficulty_factor: 1.0,
     };
 
     let model = ErrorModel::default();
@@ -771,7 +783,77 @@ pub fn calculate(
     attrs.timing_reference_accuracy = timing.reference_accuracy;
     attrs.judgement_units = Some(JudgementUnitCache::from_vec(units));
 
+    // Compute map-based timing difficulty factor
+    attrs.timing_difficulty_factor = compute_map_timing_difficulty(&attrs, &timing);
+
     Some(attrs)
+}
+
+/// Compute map-based timing difficulty factor from map properties.
+///
+/// This is a PP multiplier that reflects the map's inherent accuracy difficulty,
+/// independent of any score. Considers:
+/// - Window tightness (via expected accuracy)
+/// - LN structure (duration distribution, density)
+/// - Overall note density and complexity
+///
+/// Returns a factor in roughly [0.85, 1.15] where:
+/// - Easy to acc (low OD, simple structure) → ~0.85-0.95
+/// - Hard to acc (high OD, complex LN) → ~1.05-1.15
+/// - Typical maps → ~1.0
+fn compute_map_timing_difficulty(
+    attrs: &SunnyManiaDifficultyAttributes,
+    timing: &TimingPpResult,
+) -> f64 {
+    // Expected accuracy at baseline sigma (12ms) - lower means harder to acc
+    let expected_acc = timing.expected_accuracy;
+
+    // Window tightness factor
+    // Lower expected acc (tight windows) = harder map = boost factor
+    // Higher expected acc (loose windows) = easier map = reduce factor
+    //
+    // Observed range: ~0.986 (HR tight) to ~0.998 (EZ loose)
+    // Use 0.994 as baseline (typical NM):
+    // - 0.998 (EZ) → 0.94 factor (-6%)
+    // - 0.994 (NM baseline) → 1.0 factor
+    // - 0.986 (HR) → 1.12 factor (+12%)
+    const BASELINE_ACC: f64 = 0.994;
+    const ACC_SCALE: f64 = 15.0;  // 0.001 acc diff = 0.015 factor diff
+
+    let window_factor = 1.0 + (BASELINE_ACC - expected_acc) * ACC_SCALE;
+
+    // LN density and complexity
+    let ln_ratio = attrs.n_long_notes as f64 / attrs.n_objects as f64;
+
+    // High LN% with varied durations = harder to acc (反键 effect)
+    // Calculate duration variance from buckets
+    let ln_factor = if ln_ratio > 0.3 {
+        // Significant LN presence
+        let total_ln = attrs.n_long_notes as f64;
+        if total_ln > 0.0 {
+            // Check if LN durations are spread across buckets (反键-like)
+            let buckets_used = attrs.ln_duration_buckets.iter()
+                .filter(|&&count| count > 0)
+                .count();
+
+            if buckets_used >= 3 && ln_ratio > 0.5 {
+                // High LN% with varied durations - modest boost
+                1.03
+            } else {
+                1.0
+            }
+        } else {
+            1.0
+        }
+    } else {
+        1.0
+    };
+
+    // Combine factors
+    let combined = window_factor * ln_factor;
+
+    // Clamp to reasonable range [0.85, 1.15]
+    combined.clamp(0.85, 1.15)
 }
 
 /// Calculate the sunny performance attributes.
@@ -846,87 +928,32 @@ fn calculate_performance_inner(
     }
 
     // Get judgement units with input-state effects
-    let units = judgement_units(attrs, total_hits, model, !per_note_difficulty_disabled());
-
-    // Baseline sigma - constant across all window widths
-    // expected_counts_at_core_sigma already accounts for window differences
-    // Set to 12ms to center clean scores around 1.0 multiplier
-    const BASELINE_SIGMA: f64 = 12.0;
-    const SIGMA_MIN: f64 = 5.0;
-    const SIGMA_MAX: f64 = 50.0;
-
-    // Get baseline expectations
-    let baseline_exp =
-        expected_counts_at_core_sigma(&units, &attrs.hit_windows, model, BASELINE_SIGMA);
-    let baseline_arr = baseline_exp.as_array();
-
-    // For each judgement, find implied sigma
-    let obs_counts = [
-        state.n320 as f64,
-        state.n300 as f64,
-        state.n200 as f64,
-        state.n100 as f64,
-        state.n50 as f64,
-        state.misses as f64,
-    ];
-
-    let mut deviations = [0.0; 6];
-    let weights = [1.0, 0.6, 0.3, 0.1, 0.05, 0.5]; // judgement importance
-
-    for i in 0..6 {
-        if obs_counts[i] < 1.0 {
-            continue; // skip if no counts
-        }
-
-        let obs_ratio = obs_counts[i] / total_hits;
-        let expected_ratio = baseline_arr[i] / total_hits;
-
-        // Binary search for sigma that produces this ratio
-        let implied_sigma = find_sigma_for_judgement_ratio(
-            obs_ratio,
-            i,
-            &units,
-            &attrs.hit_windows,
-            model,
-            total_hits,
-        )
-        .clamp(SIGMA_MIN, SIGMA_MAX);
-
-        // Deviation from baseline
-        let mut dev = BASELINE_SIGMA - implied_sigma;
-
-        // Asymmetric: penalties 1.5x harsher
-        if dev < 0.0 {
-            dev *= 1.5;
-        }
-
-        deviations[i] = dev;
-    }
-
-    // Weighted average deviation
-    let weighted_dev: f64 = deviations
-        .iter()
-        .zip(obs_counts.iter())
-        .zip(weights.iter())
-        .map(|((dev, count), weight)| dev * count * weight)
-        .sum();
-    let total_weight: f64 = obs_counts
-        .iter()
-        .zip(weights.iter())
-        .map(|(count, weight)| count * weight)
-        .sum();
-
-    let avg_deviation = if total_weight > 0.0 {
-        weighted_dev / total_weight
-    } else {
-        0.0
-    };
-
-    // Map to multiplier - scale 0.02 for wider range without hitting clamps
-    // avg_deviation range roughly [-30, +10] ms → multiplier range [0.4, 1.2] before clamp
-    let timing_multiplier = (1.0 + avg_deviation * 0.02).clamp(0.7, 1.15);
+    let _units = judgement_units(attrs, total_hits, model, !per_note_difficulty_disabled());
 
     let xxy_pp = xxy_pp_pattern + xxy_pp_accuracy;
+
+    // Two-part timing adjustment:
+    // 1. Map-based factor (computed in SR, same for all scores on this map)
+    let map_timing_factor = attrs.timing_difficulty_factor;
+
+    // 2. Score-based adjustment: compare player's acc to expected acc
+    // Expected acc is at 8.5ms sigma (average skilled player on this map structure)
+    // Player acc is their actual custom_accuracy (305-based, not 320-based)
+    let expected_acc = attrs.timing_expected_accuracy;
+
+    // Relative performance: how much better/worse than expected
+    // score_acc = 0.98, expected = 0.97 → ratio = 1.0103 → small bonus
+    // score_acc = 0.96, expected = 0.97 → ratio = 0.9897 → small penalty
+    let acc_ratio = score_accuracy / expected_acc;
+
+    // Convert to multiplier with dampening (don't want huge swings)
+    // Use square root to compress the effect:
+    // - 1.02 ratio → 1.01 multiplier (+1%)
+    // - 0.98 ratio → 0.99 multiplier (-1%)
+    let score_timing_adjustment = acc_ratio.sqrt().clamp(0.85, 1.15);
+
+    // Combine both factors
+    let timing_multiplier = map_timing_factor * score_timing_adjustment;
 
     // Apply timing multiplier on top of Sunny's accuracy system
     let pp_with_timing = xxy_pp * timing_multiplier;
@@ -941,12 +968,12 @@ fn calculate_performance_inner(
         xxy_pp_accuracy,
         pp_timing: pp_with_timing - xxy_pp,
 
-        timing_expected_accuracy: baseline_exp.custom_accuracy(),
-        timing_reference_accuracy: baseline_exp.custom_accuracy(),
-        timing_core_sigma: BASELINE_SIGMA,
+        timing_expected_accuracy: attrs.timing_expected_accuracy,
+        timing_reference_accuracy: attrs.timing_reference_accuracy,
+        timing_core_sigma: 12.0,  // Baseline used in map difficulty calculation
 
         variety_multiplier: xxy_variety_multiplier,
-        acc_multiplier: timing_multiplier,
+        acc_multiplier: timing_multiplier,  // Combined: map factor × score adjustment
         length_multiplier: xxy_length_multiplier,
     };
 
@@ -1535,53 +1562,6 @@ fn compute_timing_pp_with_units(
         reference_accuracy,
         core_sigma: TIMING_BASELINE_SIGMA,
     }
-}
-
-fn find_sigma_for_judgement_ratio(
-    target_ratio: f64,
-    judgement_idx: usize,
-    units: &[JudgementUnit],
-    hit_windows: &ManiaHitWindows,
-    model: &ErrorModel,
-    total_hits: f64,
-) -> f64 {
-    const SIGMA_MIN: f64 = 5.0;
-    const SIGMA_MAX: f64 = 50.0;
-    const EPSILON: f64 = 0.001;
-
-    let mut low = SIGMA_MIN;
-    let mut high = SIGMA_MAX;
-
-    for _ in 0..30 {
-        let mid = (low + high) / 2.0;
-        let expected = expected_counts_at_core_sigma(units, hit_windows, model, mid);
-        let arr = expected.as_array();
-        let ratio = arr[judgement_idx] / total_hits;
-
-        if (ratio - target_ratio).abs() < EPSILON {
-            return mid;
-        }
-
-        // Lower sigma = tighter = more 320s, fewer misses
-        // Higher sigma = looser = fewer 320s, more misses
-        if judgement_idx == 0 {
-            // 320s: want more → decrease sigma
-            if ratio < target_ratio {
-                high = mid;
-            } else {
-                low = mid;
-            }
-        } else {
-            // Other judgements: want more → increase sigma
-            if ratio < target_ratio {
-                low = mid;
-            } else {
-                high = mid;
-            }
-        }
-    }
-
-    (low + high) / 2.0
 }
 
 // ---------------------------------------------------------------------------
