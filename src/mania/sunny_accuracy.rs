@@ -274,11 +274,15 @@ const MEASURED_ANTICIPATION_OFFSET: f64 = -2.517;
 /// spread. Hold-duration distributions do not inform this constant.
 pub(crate) const TIMING_CORE_SIGMA: f64 = 8.5;
 
-/// Compresses the expected-loss transfer ratio before it enters PP.
+/// Baseline sigma representing SS-tier timing precision (milliseconds).
 ///
-/// Chosen from the multi-user sensitivity report to prevent the raw surface tails
-/// from dominating PP. This is a transfer tuning parameter, not a replay fit.
-pub(crate) const TIMING_LOSS_TRANSFER_EXPONENT: f64 = 0.16;
+/// This represents the timing precision of high-accuracy (SS-tier, ~95%+) scores
+/// used as the reference point for timing PP adjustments. Players with tighter
+/// timing (lower fitted sigma) receive rewards; players with looser timing
+/// (higher fitted sigma) receive penalties.
+///
+/// Value derived from observed fitted sigma of high-accuracy scores (~10-11ms).
+pub(crate) const TIMING_BASELINE_SIGMA: f64 = 11.0;
 
 /// Replay-calibrated timing-distribution shape and structural offsets.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -1038,7 +1042,7 @@ impl ExpectedCounts {
 ///
 /// One per note in classic scoring; LN heads and tails are separate units when
 /// they are judged separately.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct JudgementUnit {
     /// Local difficulty in star-rating units.
     pub difficulty: f64,
@@ -1339,8 +1343,9 @@ pub fn log_likelihood_at_core_sigma(
 /// Timing spread in milliseconds that best explains a score's hit-judgement
 /// composition under its played windows and structural timing conditions.
 ///
-/// The replay-measured core is the lower edge of the model: poorer hit compositions
-/// add spread, while saturated scores merely provide no evidence of extra spread.
+/// The minimum fitting bound is lower than TIMING_CORE_SIGMA to allow distinguishing
+/// between very precise scores. The core sigma represents the replay-measured average,
+/// but individual scores can demonstrate tighter precision.
 /// Map stars cannot affect this fit.
 pub fn timing_sigma_for_counts(
     counts: &[u32; 6],
@@ -1348,6 +1353,7 @@ pub fn timing_sigma_for_counts(
     windows: &ManiaHitWindows,
     model: &ErrorModel,
 ) -> f64 {
+    const SIGMA_MIN: f64 = 5.0; // Allow fitting tighter than the measured average
     const SIGMA_MAX: f64 = 1_000.0;
 
     if units.is_empty() || counts.iter().all(|&count| count == 0) {
@@ -1357,7 +1363,7 @@ pub fn timing_sigma_for_counts(
     let evaluate = |log_sigma: f64| {
         log_likelihood_at_core_sigma(counts, units, windows, model, log_sigma.exp())
     };
-    let scan_low = TIMING_CORE_SIGMA.ln();
+    let scan_low = SIGMA_MIN.ln();
     let scan_high = SIGMA_MAX.ln();
     let step = (scan_high - scan_low) / SCAN_POINTS as f64;
     let mut best_value = f64::NEG_INFINITY;

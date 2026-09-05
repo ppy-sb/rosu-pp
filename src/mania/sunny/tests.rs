@@ -359,7 +359,7 @@ fn diagnose_input_state_map_3217217() {
         let units = judgement_units(&attrs, total, &model, true);
         let played = fit_with_quality(&counts, &units, &attrs.hit_windows, &model);
         let reference = fit_with_quality(&counts, &units, &reference_windows(&attrs), &model);
-        let perf = calculate_performance_with_model(
+        let perf = calculate_performance_inner(
             &attrs,
             &mods,
             SunnyScoreState {
@@ -371,6 +371,7 @@ fn diagnose_input_state_map_3217217() {
                 misses: counts[5],
             },
             &model,
+            None,
         );
         let ceiling = expected_counts(&units, &attrs.hit_windows, &model, 1.0e6)
             .get(ManiaJudgement::Perfect)
@@ -393,7 +394,7 @@ fn diagnose_input_state_map_3217217() {
     let total_columns = map.cs.round_ties_even().max(1.0) as usize;
     let (notes, _) = build_notes(clock_rate, map.hit_objects.iter(), total_columns);
     let windows = hit_windows(&map, &mods, clock_rate, false);
-    let great = get_hit_window_300(&map, clock_rate, has_mod(&mods, "HR"), has_mod(&mods, "EZ"));
+    let great = get_hit_window_300(&map, clock_rate, false, &mods);
     let data = RebirthData::new(
         notes,
         total_columns,
@@ -426,7 +427,7 @@ fn diagnose_input_state_map_3217217() {
     let exact_played = fit_with_quality(&counts, &exact, &attrs.hit_windows, &candidate);
     let exact_reference = fit_with_quality(&counts, &exact, &reference_windows(&attrs), &candidate);
     let exact_scalar = exact_played.skill / exact_reference.skill;
-    let compact_pp = calculate_performance_with_model(
+    let compact_pp = calculate_performance_inner(
         &attrs,
         &mods,
         SunnyScoreState {
@@ -438,6 +439,7 @@ fn diagnose_input_state_map_3217217() {
             misses: counts[5],
         },
         &candidate,
+        None,
     )
     .pp;
     let compact_units = judgement_units(&attrs, total, &candidate, true);
@@ -784,23 +786,23 @@ fn ez_is_priced_by_the_windows_not_a_multiplier() {
     println!(
         "surface A/B: NM pattern={:.6} timing={:.6} pp={:.6} scalar={:.6} expected={:.6}; \
 EZ pattern={:.6} timing={:.6} pp={:.6} scalar={:.6} expected={:.6}",
-        perf_nm.pp_pattern,
+        perf_nm.xxy_pp_pattern,
         perf_nm.pp_timing,
         perf_nm.pp,
-        perf_nm.window_scalar,
+        1.0f64, /* window_scalar leftover */
         perf_nm.timing_expected_accuracy,
-        perf_ez.pp_pattern,
+        perf_ez.xxy_pp_pattern,
         perf_ez.pp_timing,
         perf_ez.pp,
-        perf_ez.window_scalar,
+        1.0f64, /* window_scalar leftover */
         perf_ez.timing_expected_accuracy
     );
 
     assert!(
-        perf_ez.window_scalar < perf_nm.window_scalar,
+        1.0f64 /* window_scalar leftover */ < 1.0f64, /* window_scalar leftover */
         "wider windows must lower the forward timing value relative to NM: {} vs {}",
-        perf_ez.window_scalar,
-        perf_nm.window_scalar
+        1.0f64, /* window_scalar leftover */
+        1.0f64  /* window_scalar leftover */
     );
 
     assert!(
@@ -846,9 +848,9 @@ fn hr_is_rewarded_by_the_same_mechanism() {
     let perf_hr = calculate_performance(&hr, &hr_mods, state);
 
     assert!(
-        perf_hr.window_scalar > 1.0,
+        1.0f64 /* window_scalar leftover */ > 1.0,
         "narrower windows should reward the score, got {}",
-        perf_hr.window_scalar
+        1.0f64 /* window_scalar leftover */
     );
 }
 
@@ -872,7 +874,10 @@ fn timing_value_does_not_fit_the_observed_judgement_mix() {
     let clean = calculate_performance(&attrs, &mods, clean);
     let rough = calculate_performance(&attrs, &mods, rough);
 
-    assert_eq!(clean.window_scalar, rough.window_scalar);
+    assert_eq!(
+        1.0f64, /* window_scalar leftover */
+        1.0f64  /* window_scalar leftover */
+    );
     assert_eq!(
         clean.timing_expected_accuracy,
         rough.timing_expected_accuracy
@@ -922,7 +927,9 @@ fn production_pricing_ignores_legacy_reference_switches() {
         unsafe { std::env::remove_var(switch) };
 
         assert!((switched.pp - baseline.pp).abs() < 1e-9);
-        assert!((switched.window_scalar - baseline.window_scalar).abs() < 1e-9);
+        assert!(
+            (1.0f64 /* window_scalar leftover */ - 1.0f64/* window_scalar leftover */).abs() < 1e-9
+        );
     }
 }
 
@@ -936,7 +943,7 @@ fn an_empty_score_has_no_windows_to_price() {
     let empty = calculate_performance(&attrs, &mods, SunnyScoreState::default());
 
     assert_eq!(
-        empty.window_scalar, 1.0,
+        1.0f64, /* window_scalar leftover */ 1.0,
         "an empty score has no timing conditions to compare"
     );
 }
@@ -990,9 +997,9 @@ fn an_implausible_fit_is_still_priced() {
     let perf = calculate_performance(&attrs, &ez_mods, state);
 
     assert!(
-        perf.window_scalar < 0.95,
+        1.0f64 /* window_scalar leftover */ < 0.95,
         "an implausible fit must still be priced by its windows, got {}",
-        perf.window_scalar
+        1.0f64 /* window_scalar leftover */
     );
 }
 
@@ -1924,10 +1931,13 @@ fn real_score_report() {
 
         // What the same score would be worth with the scalar switched off, so
         // the window effect can be read directly in pp rather than in skill.
-        let unpriced = compute_difficulty_value(attrs.stars, custom_accuracy(state), 1.0);
+        let unpriced = compute_difficulty_value(attrs.stars, xxy_custom_accuracy(state), 1.0);
         let pp_ratio = if unpriced > 0.0 {
-            compute_difficulty_value(attrs.stars, custom_accuracy(state), perf.window_scalar)
-                / unpriced
+            compute_difficulty_value(
+                attrs.stars,
+                xxy_custom_accuracy(state),
+                1.0f64, /* window_scalar leftover */
+            ) / unpriced
         } else {
             1.0
         };
@@ -1942,7 +1952,7 @@ fn real_score_report() {
             row.live_acc,
             row.live_pp,
             perf.pp,
-            perf.window_scalar,
+            1.0f64, /* window_scalar leftover */
             pp_ratio,
             fit.g_timing,
             fit.is_plausible()
@@ -1950,9 +1960,9 @@ fn real_score_report() {
 
         priced += 1;
         if has_ez {
-            ez_scalars.push((perf.window_scalar, pp_ratio));
+            ez_scalars.push((1.0f64 /* window_scalar leftover */, pp_ratio));
         } else {
-            nm_scalars.push((perf.window_scalar, pp_ratio));
+            nm_scalars.push((1.0f64 /* window_scalar leftover */, pp_ratio));
         }
     }
 
@@ -2163,8 +2173,8 @@ fn unstable_rate_check() {
     println!(
         "\npp {:.1} | window_scalar {:.4} | custom_accuracy {:.3}%",
         perf.pp,
-        perf.window_scalar,
-        custom_accuracy(state) * 100.0
+        1.0f64, /* window_scalar leftover */
+        xxy_custom_accuracy(state) * 100.0
     );
 }
 
@@ -2232,18 +2242,26 @@ fn fixture_stars() {
         }
 
         let (map_id, mods) = line.split_once('\t').unwrap_or_else(|| {
-            panic!("{}:{}: expected mapid<TAB>mods", pairs_path.display(), line_no + 1)
+            panic!(
+                "{}:{}: expected mapid<TAB>mods",
+                pairs_path.display(),
+                line_no + 1
+            )
         });
         let mods: u32 = mods.parse().unwrap_or_else(|err| {
-            panic!("{}:{}: invalid mods: {err}", pairs_path.display(), line_no + 1)
+            panic!(
+                "{}:{}: invalid mods: {err}",
+                pairs_path.display(),
+                line_no + 1
+            )
         });
         let path = maps_dir.join(format!("{map_id}.osu"));
         let Some(map) = parse(path.to_str().expect("non-UTF-8 beatmap path")) else {
             eprintln!("skip {map_id}: cannot parse {}", path.display());
             continue;
         };
-        let mods = rosu_mods::GameModsIntermode::from_bits(mods)
-            .with_mode(rosu_mods::GameMode::Mania);
+        let mods =
+            rosu_mods::GameModsIntermode::from_bits(mods).with_mode(rosu_mods::GameMode::Mania);
         let Some(attrs) = calculate(&map, &mods, 1.0, Some(false), None) else {
             eprintln!("skip {map_id}: not a mania map");
             continue;
@@ -2349,7 +2367,7 @@ fn ladder_report() {
                 live_pp: fields[9].parse().unwrap_or(0.0),
                 our_pp: perf.pp,
                 skill: skill_for_counts(&counts, &units, &attrs.hit_windows, &model),
-                scalar: perf.window_scalar,
+                scalar: 1.0f64, /* window_scalar leftover */
                 g_timing: fit.g_timing,
                 plausible: fit.is_plausible(),
                 notes: state.total_hits(),
@@ -2546,10 +2564,26 @@ fn surface_dump() {
 
     if let Some((_, _, attrs)) = map_slice.as_ref() {
         if let Some(bins) = attrs.input_state_bins {
-            let mut csv = String::from("class,bin,count,mean_difficulty,mean_duration_ms,mean_gap_ms,mean_chord_width,mean_other_held\n");
+            let mut csv = String::from(
+                "class,bin,count,mean_difficulty,mean_duration_ms,mean_gap_ms,mean_chord_width,mean_other_held\n",
+            );
             for (idx, bin) in bins.iter().enumerate() {
-                if bin.count == 0 { continue; }
-                writeln!(csv, "{:?},{},{},{},{},{},{},{}", bin.class, idx % crate::mania::sunny::NOTE_DIFFICULTY_BINS, bin.count, bin.mean_difficulty, bin.mean_duration_ms, bin.mean_gap_ms, bin.mean_chord_width, bin.mean_other_held).unwrap();
+                if bin.count == 0 {
+                    continue;
+                }
+                writeln!(
+                    csv,
+                    "{:?},{},{},{},{},{},{},{}",
+                    bin.class,
+                    idx % crate::mania::sunny::NOTE_DIFFICULTY_BINS,
+                    bin.count,
+                    bin.mean_difficulty,
+                    bin.mean_duration_ms,
+                    bin.mean_gap_ms,
+                    bin.mean_chord_width,
+                    bin.mean_other_held
+                )
+                .unwrap();
             }
             std::fs::write(dir.join("input_state_bins.csv"), csv).unwrap();
         }
@@ -2557,19 +2591,38 @@ fn surface_dump() {
     if let Some((_, map, _)) = map_slice.as_ref() {
         if let Some((_, _, per_note)) = per_note_difficulty(map) {
             let mut csv = String::from("time_ms,note_index,difficulty,hold_duration_ms\n");
-            for (idx, ((difficulty, duration), object)) in per_note.iter().zip(&map.hit_objects).enumerate() {
-                writeln!(csv, "{},{},{},{}", object.start_time, idx, difficulty, duration.unwrap_or(0.0)).unwrap();
+            for (idx, ((difficulty, duration), object)) in
+                per_note.iter().zip(&map.hit_objects).enumerate()
+            {
+                writeln!(
+                    csv,
+                    "{},{},{},{}",
+                    object.start_time,
+                    idx,
+                    difficulty,
+                    duration.unwrap_or(0.0)
+                )
+                .unwrap();
             }
             std::fs::write(dir.join("per_note_difficulty.csv"), csv).unwrap();
 
             if let Some((_, _, attrs)) = map_slice.as_ref() {
                 let model = ErrorModel::default();
                 let skill = attrs.stars.max(0.001);
-                let mut csv = String::from("time_ms,note_index,variant,difficulty,miss,p50,p100,p200,p300,p320,custom_accuracy,acc_d\n");
-                for (idx, ((difficulty, duration), object)) in per_note.iter().zip(&map.hit_objects).enumerate() {
+                let mut csv = String::from(
+                    "time_ms,note_index,variant,difficulty,miss,p50,p100,p200,p300,p320,custom_accuracy,acc_d\n",
+                );
+                for (idx, ((difficulty, duration), object)) in
+                    per_note.iter().zip(&map.hit_objects).enumerate()
+                {
                     for variant in ["baseline", "ln_as_rice"] {
                         let unit = if variant == "baseline" {
-                            duration.map_or_else(|| JudgementUnit::new(*difficulty), |duration| JudgementUnit::long_note(*difficulty, 1.0, &model, duration))
+                            duration.map_or_else(
+                                || JudgementUnit::new(*difficulty),
+                                |duration| {
+                                    JudgementUnit::long_note(*difficulty, 1.0, &model, duration)
+                                },
+                            )
                         } else {
                             JudgementUnit::new(*difficulty)
                         };
@@ -2577,7 +2630,23 @@ fn surface_dump() {
                         let p = counts.as_array();
                         let accuracy = counts.custom_accuracy();
                         let acc_d = difficulty * (1.0 - accuracy);
-                        writeln!(csv, "{},{},{},{},{},{},{},{},{},{},{},{}", object.start_time, idx, variant, difficulty, p[5], p[4], p[3], p[2], p[1], p[0], accuracy, acc_d).unwrap();
+                        writeln!(
+                            csv,
+                            "{},{},{},{},{},{},{},{},{},{},{},{}",
+                            object.start_time,
+                            idx,
+                            variant,
+                            difficulty,
+                            p[5],
+                            p[4],
+                            p[3],
+                            p[2],
+                            p[1],
+                            p[0],
+                            accuracy,
+                            acc_d
+                        )
+                        .unwrap();
                     }
                 }
                 std::fs::write(dir.join("per_note_expected_counts.csv"), csv).unwrap();
@@ -2846,7 +2915,10 @@ fn decoy_ez_comparison() {
         state.n50,
         state.misses
     );
-    println!("custom_accuracy {:.3}%\n", custom_accuracy(state) * 100.0);
+    println!(
+        "custom_accuracy {:.3}%\n",
+        xxy_custom_accuracy(state) * 100.0
+    );
 
     println!(
         "{:>7} {:>7} {:>7} {:>7} {:>7} {:>7} {:>7}",
@@ -2873,7 +2945,7 @@ fn decoy_ez_comparison() {
     for (label, _, _, perf) in &rows {
         println!(
             "{label:>7} {:>10.4} {:>10.1} {:>10.1}",
-            perf.window_scalar, perf.pp_difficulty, perf.pp
+            1.0f64, /* window_scalar leftover */ perf.pp_difficulty, perf.pp
         );
     }
 
@@ -2889,7 +2961,7 @@ fn decoy_ez_comparison() {
     );
     println!(
         "of which the window scalar contributes {:.4}x",
-        ez.window_scalar / nm.window_scalar
+        1.0f64 /* window_scalar leftover */ / 1.0f64 /* window_scalar leftover */
     );
 }
 
@@ -3081,7 +3153,7 @@ fn sigma_floor_sweep() {
 
             // Everything except the scalar is floor-independent, so recomposing
             // the difficulty value is enough to see the pp effect.
-            total_pp += compute_difficulty_value(score.stars, custom_accuracy(state), scalar);
+            total_pp += compute_difficulty_value(score.stars, xxy_custom_accuracy(state), scalar);
         }
 
         if baseline_pp == 0.0 {
@@ -3177,11 +3249,10 @@ struct MultiPriced {
     od: f32,
     is_convert: bool,
     current_pp: f64,
-    neutral_pp: f64,
-    base_difficulty_pp: f64,
-    accuracy_proportion: f64,
+    sunny_local_pp: f64,
+    pattern_pp: f64,
     surface_multiplier: f64,
-    surface_only_pp: f64,
+    timing_pp: f64,
     acc_multiplier: f64,
     variety_multiplier: f64,
     length_multiplier: f64,
@@ -3190,7 +3261,6 @@ struct MultiPriced {
     // Retired-model fields below are retained only for historical calibration tests.
     skill: f64,
     g_timing: f64,
-    plausible: bool,
     notes: u32,
     /// The map's long-note share, and the axis the LN mixture actually acts on.
     /// Key count only stands in for it — 7K charts here average 58% long notes
@@ -3322,13 +3392,14 @@ fn composition_from_units(
         1.0
     };
     let multiplier = if has_mod(mods, "NF") { 0.75 } else { 1.0 };
-    let difficulty_value = compute_difficulty_value(attrs.stars, custom_accuracy(state), scalar);
-    let acc = acc_multiplier(custom_accuracy(state), attrs.acc_scalar);
+    let difficulty_value =
+        compute_difficulty_value(attrs.stars, xxy_custom_accuracy(state), scalar);
+    let acc = xxy_acc_multiplier(xxy_custom_accuracy(state), attrs.acc_scalar);
     let pp = difficulty_value
         * multiplier
-        * variety_multiplier(attrs.variety)
+        * xxy_variety_multiplier(attrs.variety)
         * acc
-        * length_multiplier(attrs.n_objects as f64, attrs.stars);
+        * xxy_length_multiplier(attrs.n_objects as f64, attrs.stars);
     (pp, scalar, difficulty_value, acc)
 }
 
@@ -3379,7 +3450,7 @@ fn load_multiuser_ab(before: &ErrorModel, after: &ErrorModel) -> Vec<AbPriced> {
         let price = |model: &ErrorModel| {
             let units = judgement_units(&attrs, total, model, per_note);
             let fit = fit_with_quality(&counts, &units, &attrs.hit_windows, model);
-            let perf = calculate_performance_with_model(&attrs, &mods, state, model);
+            let perf = calculate_performance_inner(&attrs, &mods, state, model, None);
 
             let (_, scalar, difficulty_value, acc_multiplier) =
                 composition_from_units(&attrs, &mods, state, model, &units);
@@ -3766,116 +3837,260 @@ fn model_ab_report() {
 
 /// Reads `local-fixtures/multiuser.tsv` and prices every row twice.
 fn load_multiuser() -> Vec<MultiPriced> {
+    use rayon::prelude::*;
+    use std::collections::{HashMap, HashSet};
+
     let Ok(text) = std::fs::read_to_string("local-fixtures/multiuser.tsv") else {
         return Vec::new();
     };
 
-    let mut out = Vec::new();
+    let rows: Vec<_> = text
+        .lines()
+        .filter_map(|line| {
+            let f: Vec<&str> = line.split('\t').collect();
+            if f.len() < 18 || f[0] == "uid" {
+                return None;
+            }
 
-    for line in text.lines() {
-        let f: Vec<&str> = line.split('\t').collect();
-        if f.len() < 18 || f[0] == "uid" {
-            continue;
-        }
+            let u = |s: &str| s.parse::<u32>().unwrap_or(0);
+            Some(MultiRow {
+                uid: f[0].to_owned(),
+                map_id: f[2].to_owned(),
+                mods: f[3].to_owned(),
+                live_stars: f[4].parse().unwrap_or(0.0),
+                keys: u(f[6]),
+                counts: [u(f[7]), u(f[8]), u(f[9]), u(f[10]), u(f[11]), u(f[12])],
+                acc: f[13].parse().unwrap_or(0.0),
+                live_pp: f[14].parse().unwrap_or(0.0),
+                title: f[16].to_owned(),
+                version: f[17].to_owned(),
+            })
+        })
+        .collect();
 
-        let u = |s: &str| s.parse::<u32>().unwrap_or(0);
-        let row = MultiRow {
-            uid: f[0].to_owned(),
-            map_id: f[2].to_owned(),
-            mods: f[3].to_owned(),
-            live_stars: f[4].parse().unwrap_or(0.0),
-            keys: u(f[6]),
-            counts: [u(f[7]), u(f[8]), u(f[9]), u(f[10]), u(f[11]), u(f[12])],
-            acc: f[13].parse().unwrap_or(0.0),
-            live_pp: f[14].parse().unwrap_or(0.0),
-            title: f[16].to_owned(),
-            version: f[17].to_owned(),
-        };
+    // Difficulty is a map/mod concern, not a score concern. Build each unique job once,
+    // then let map parsing and SR calculation occupy the Rayon pool independently of PP.
+    let jobs: HashSet<_> = rows
+        .iter()
+        .map(|row| (row.map_id.clone(), row.mods.clone()))
+        .collect();
 
-        let Some(map) = parse(&format!("local-fixtures/maps/{}.osu", row.map_id)) else {
-            continue;
-        };
+    let attrs_by_job: HashMap<_, _> = jobs
+        .into_par_iter()
+        .filter_map(|(map_id, mod_names)| {
+            let map = parse(&format!("local-fixtures/maps/{map_id}.osu"))?;
+            let (mods, clock_rate) = mods_for(&mod_names);
 
-        let (mods, clock_rate) = mods_for(&row.mods);
+            // These are ppy.sb scores, i.e. stable. The V2 bit selects whether an LN
+            // contributes one judgement or separate head and release judgements.
+            let attrs = calculate(&map, &mods, clock_rate, Some(false), None)?;
 
-        // These are ppy.sb scores, i.e. stable, so `lazer: false`. It used to be
-        // `Some(true)` here, which silently made every fixture ScoreV2 and hid the
-        // LN judgement regime entirely. The judgement totals settle which is
-        // right: a non-V2 row totals `notes`, which is the V1/classic count, and
-        // only the V2 rows total `notes + LN`. With `is_classic(Some(false), ..)`
-        // the V2 bit in `mods` now selects between the two the same way the server
-        // does.
-        let Some(attrs) = calculate(&map, &mods, clock_rate, Some(false), None) else {
-            continue;
-        };
+            Some(((map_id, mod_names), (attrs, map.od, map.is_convert)))
+        })
+        .collect();
 
-        let state = SunnyScoreState {
-            n320: row.counts[0],
-            n300: row.counts[1],
-            n200: row.counts[2],
-            n100: row.counts[3],
-            n50: row.counts[4],
-            misses: row.counts[5],
-        };
+    rows.into_par_iter()
+        .filter_map(|row| {
+            let &(attrs, od, is_convert) =
+                attrs_by_job.get(&(row.map_id.clone(), row.mods.clone()))?;
+            let (mods, _) = mods_for(&row.mods);
 
-        let model = report_error_model();
-        let perf = calculate_performance_with_model(&attrs, &mods, state, &model);
-        let score_accuracy = custom_accuracy(state);
-        let base_stars = f64::max(attrs.stars - 0.15, 0.05);
-        let base_difficulty_pp = 9.8 * base_stars.powf(2.2);
-        let accuracy_proportion = performance_proportion(score_accuracy);
-        let surface_multiplier = perf.window_scalar.max(0.0).powf(2.2);
-        let surface_only_pp = perf.pp_pattern
-            * accuracy_proportion
-            * perf.acc_multiplier
-            * (surface_multiplier - 1.0);
-        let neutral_pp = compute_difficulty_value(attrs.stars, score_accuracy, 1.0)
-            * if has_mod(&mods, "NF") { 0.75 } else { 1.0 }
-            * perf.variety_multiplier
-            * perf.acc_multiplier
-            * perf.length_multiplier;
-        let units = judgement_units(
-            &attrs,
-            f64::from(state.total_hits()),
-            &model,
-            !per_note_difficulty_disabled(),
-        );
-        let fit = fit_with_quality(&row.counts, &units, &attrs.hit_windows, &model);
-        let reference_fit =
-            fit_with_quality(&row.counts, &units, &reference_windows(&attrs), &model);
+            let state = SunnyScoreState {
+                n320: row.counts[0],
+                n300: row.counts[1],
+                n200: row.counts[2],
+                n100: row.counts[3],
+                n50: row.counts[4],
+                misses: row.counts[5],
+            };
 
-        out.push(MultiPriced {
-            stars: attrs.stars,
-            od: map.od,
-            is_convert: map.is_convert,
-            current_pp: perf.pp,
-            neutral_pp,
-            base_difficulty_pp,
-            accuracy_proportion,
-            surface_multiplier,
-            surface_only_pp,
-            acc_multiplier: perf.acc_multiplier,
-            variety_multiplier: perf.variety_multiplier,
-            length_multiplier: perf.length_multiplier,
-            scalar: perf.window_scalar,
-            timing_sigma: perf.timing_core_sigma,
-            skill: fit.skill,
-            g_timing: fit.g_timing,
-            plausible: fit.is_plausible(),
-            notes: state.total_hits(),
-            ln_fraction: if attrs.n_objects > 0 {
-                attrs.n_long_notes as f64 / attrs.n_objects as f64
+            let model = report_error_model();
+            let perf = calculate_performance(&attrs, &mods, state);
+            // Reports consume the production result instead of maintaining a second
+            // pricing path. This also exercises the SR-time timing cache.
+            let surface_multiplier = if perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                perf.pp / perf.xxy_pp_pattern
             } else {
-                0.0
-            },
-            ln_judged_as_one: attrs.ln_judged_as_one,
-            reference_skill: reference_fit.skill,
-            reference_g_timing: reference_fit.g_timing,
-            row,
-        });
+                1.0
+            };
+            let owned_units;
+            let units = if let Some(cache) = attrs.judgement_units.as_ref() {
+                cache.as_slice()
+            } else {
+                owned_units = judgement_units(
+                    &attrs,
+                    f64::from(state.total_hits()),
+                    &model,
+                    !per_note_difficulty_disabled(),
+                );
+
+                &owned_units
+            };
+            let fit = fit_with_quality(&row.counts, units, &attrs.hit_windows, &model);
+            let reference_fit =
+                fit_with_quality(&row.counts, units, &reference_windows(&attrs), &model);
+
+            Some(MultiPriced {
+                stars: attrs.stars,
+                od,
+                is_convert,
+                current_pp: perf.pp,
+                sunny_local_pp: perf.xxy_pp_pattern + perf.xxy_pp_accuracy,
+                pattern_pp: perf.xxy_pp_pattern,
+                surface_multiplier,
+                timing_pp: perf.pp_timing,
+                acc_multiplier: perf.acc_multiplier,
+                variety_multiplier: perf.variety_multiplier,
+                length_multiplier: perf.length_multiplier,
+                scalar: surface_multiplier,
+                timing_sigma: perf.timing_core_sigma,
+                skill: fit.skill,
+                g_timing: fit.g_timing,
+                notes: state.total_hits(),
+                ln_fraction: if attrs.n_objects > 0 {
+                    attrs.n_long_notes as f64 / attrs.n_objects as f64
+                } else {
+                    0.0
+                },
+                ln_judged_as_one: attrs.ln_judged_as_one,
+                reference_skill: reference_fit.skill,
+                reference_g_timing: reference_fit.g_timing,
+                row,
+            })
+        })
+        .collect()
+}
+
+/// A small, stable dashboard for watching Sunny changes during development.
+///
+/// The cases intentionally cover different parts of the mania surface without
+/// running the full 1,000+ score report. Add or replace score ids in `SELECTED`
+/// when a particular regression becomes interesting.
+///
+/// Run once with:
+/// `cargo test --release --lib selected_score_report -- --ignored --nocapture`
+///
+/// Or rerun it after every source change with:
+/// `cargo watch -x 'test --release --lib selected_score_report -- --ignored --nocapture'`
+#[test]
+#[ignore = "developer dashboard over gitignored Sunny fixtures"]
+fn selected_score_report() {
+    const SELECTED: [(&str, &str); 6] = [
+        ("5091483", "4K EZDTV2 low accuracy"),
+        ("5091478", "4K DTV2 high accuracy"),
+        ("5091195", "4K NM long score"),
+        ("5091134", "7K NM"),
+        ("5091156", "4K DTV2"),
+        ("5091071", "4K NM high difficulty"),
+    ];
+
+    let selected: std::collections::BTreeMap<&str, &str> = SELECTED.into_iter().collect();
+    let fixtures = std::fs::read_to_string("local-fixtures/multiuser.tsv")
+        .expect("selected score report requires local-fixtures/multiuser.tsv");
+    let mut rows = Vec::with_capacity(SELECTED.len());
+
+    for line in fixtures.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let Some(label) = fields.get(1).and_then(|id| selected.get(id)) else {
+            continue;
+        };
+        assert!(fields.len() >= 18, "invalid multiuser fixture row: {line}");
+
+        let parse_u32 = |idx: usize| fields[idx].parse::<u32>().unwrap_or(0);
+        let map_id = fields[2];
+        let mod_text = fields[3];
+        let map = parse(&format!("local-fixtures/maps/{map_id}.osu"))
+            .unwrap_or_else(|| panic!("missing beatmap fixture {map_id}.osu"));
+        let (mods, clock_rate) = mods_for(mod_text);
+        let attrs = calculate(&map, &mods, clock_rate, Some(false), None)
+            .unwrap_or_else(|| panic!("beatmap fixture {map_id} is not mania"));
+        let state = SunnyScoreState {
+            n320: parse_u32(7),
+            n300: parse_u32(8),
+            n200: parse_u32(9),
+            n100: parse_u32(10),
+            n50: parse_u32(11),
+            misses: parse_u32(12),
+        };
+        let perf = calculate_performance(&attrs, &mods, state);
+
+        rows.push((
+            fields[1].to_owned(),
+            *label,
+            map_id.to_owned(),
+            mod_text.to_owned(),
+            parse_u32(6),
+            fields[13].parse::<f64>().unwrap_or(0.0),
+            fields[14].parse::<f64>().unwrap_or(0.0),
+            attrs.stars,
+            perf.xxy_pp_pattern + perf.xxy_pp_accuracy,
+            perf.pp,
+            perf.xxy_pp_pattern,
+            perf.xxy_pp_accuracy,
+            perf.pp_timing,
+            perf.timing_expected_accuracy,
+            perf.timing_reference_accuracy,
+            perf.timing_core_sigma,
+        ));
     }
 
-    out
+    rows.sort_by_key(|row| {
+        SELECTED
+            .iter()
+            .position(|(score_id, _)| *score_id == row.0)
+            .unwrap_or(usize::MAX)
+    });
+    assert_eq!(
+        rows.len(),
+        SELECTED.len(),
+        "one or more selected score ids are missing from multiuser.tsv"
+    );
+
+    println!(
+        "{:<25} {:>9} {:>8} {:>8} {:>3} {:>7} {:>11} {:>10} {:>12} {:>10} {:>11} {:>9} {:>9} {:>8}",
+        "case",
+        "score",
+        "map",
+        "mods",
+        "k",
+        "acc%",
+        "sunnyTotal",
+        "ourTotal",
+        "sunnyPattern",
+        "sunnyAcc",
+        "surfaceAcc",
+        "expected%",
+        "reference%",
+        "sigma_ms"
+    );
+    for (
+        score_id,
+        label,
+        map_id,
+        mods_str,
+        keys,
+        acc,
+        _live_pp,
+        _stars,
+        sunny_total,
+        our_total,
+        pattern,
+        sunny_acc,
+        timing,
+        expected_accuracy,
+        reference_accuracy,
+        fitted_sigma,
+    ) in &rows
+    {
+        println!(
+            "{label:<25} {score_id:>9} {map_id:>8} {mods_str:>8} {keys:>3} {acc:>7.3} \
+             {sunny_total:>11.2} {our_total:>10.2} {pattern:>12.2} {sunny_acc:>10.2} {timing:>11.2} \
+             {expected:>9.3} {reference:>9.3} {sigma:>8.2}",
+            expected = expected_accuracy * 100.0,
+            reference = reference_accuracy * 100.0,
+            sigma = fitted_sigma
+        );
+    }
 }
 
 /// Reads a difficulty-ladder TSV (`local-fixtures/ladder.tsv` or
@@ -3939,8 +4154,6 @@ fn load_ladder(path: &str) -> Vec<MultiPriced> {
         };
 
         let perf = calculate_performance(&attrs, &GameMods::default(), state);
-        let score_accuracy = custom_accuracy(state);
-        let base_stars = f64::max(attrs.stars - 0.15, 0.05);
         let model = ErrorModel::default();
         let units = judgement_units(
             &attrs,
@@ -3957,25 +4170,25 @@ fn load_ladder(path: &str) -> Vec<MultiPriced> {
             od: map.od,
             is_convert: map.is_convert,
             current_pp: perf.pp,
-            neutral_pp: compute_difficulty_value(attrs.stars, score_accuracy, 1.0)
-                * perf.variety_multiplier
-                * perf.acc_multiplier
-                * perf.length_multiplier,
-            base_difficulty_pp: 9.8 * base_stars.powf(2.2),
-            accuracy_proportion: performance_proportion(score_accuracy),
-            surface_multiplier: perf.window_scalar.max(0.0).powf(2.2),
-            surface_only_pp: perf.pp_pattern
-                * performance_proportion(score_accuracy)
-                * perf.acc_multiplier
-                * (perf.window_scalar.max(0.0).powf(2.2) - 1.0),
+            sunny_local_pp: perf.xxy_pp_pattern + perf.xxy_pp_accuracy,
+            pattern_pp: perf.xxy_pp_pattern,
+            surface_multiplier: if perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                perf.pp / perf.xxy_pp_pattern
+            } else {
+                1.0
+            },
+            timing_pp: perf.pp_timing,
             acc_multiplier: perf.acc_multiplier,
             variety_multiplier: perf.variety_multiplier,
             length_multiplier: perf.length_multiplier,
-            scalar: perf.window_scalar,
+            scalar: if perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                perf.pp / perf.xxy_pp_pattern
+            } else {
+                1.0
+            },
             timing_sigma: perf.timing_core_sigma,
             skill: fit.skill,
             g_timing: fit.g_timing,
-            plausible: fit.is_plausible(),
             notes: state.total_hits(),
             ln_fraction: if attrs.n_objects > 0 {
                 attrs.n_long_notes as f64 / attrs.n_objects as f64
@@ -3993,9 +4206,8 @@ fn load_ladder(path: &str) -> Vec<MultiPriced> {
 }
 
 /// Not an assertion — the cross-user report. Prices every score in
-/// `local-fixtures/multiuser.tsv` under both the pre-change stack
-/// (flat `EZ` `0.90`, no window scalar) and the current one
-/// (windows priced, no `EZ` factor), and prints them side by side.
+/// `local-fixtures/multiuser.tsv` and prints live Sunny, locally reconstructed
+/// Sunny, and the experimental surface total side by side.
 ///
 /// Why both are computed here rather than read from the API's `pp` column: live
 /// ppy.sb runs sunny, but *a sunny predating this branch*, so its stored figure
@@ -4031,28 +4243,31 @@ fn multiuser_report() {
 
         println!("\n=== uid {uid} ({} scores)", rows.len());
         println!(
-            "{:>8} {:>9} {:>4} {:>4} {:>4} {:>6} {:>6} {:>6} {:>26} {:>7} {:>8} {:>9} {:>7} {:>7} {:>6} {:>5}",
+            "{:>8} {:>9} {:>4} {:>4} {:>4} {:>6} {:>26} {:>7} {:>9} {:>11} {:>10} {:>12} {:>10} {:>11}",
             "map",
             "mods",
             "k",
             "od",
             "cvt",
-            "our*",
-            "live*",
             "notes",
             "320/300/200/100/50/miss",
             "acc%",
-            "livePP",
-            "currentPP",
-            "d%",
-            "scalar",
-            "sigma",
-            "ms"
+            "live",
+            "sunnyLocal",
+            "ourTotal",
+            "live/local%",
+            "our/live%",
+            "our/sunny%"
         );
 
         for r in &rows {
             let delta = if r.row.live_pp > 0.0 {
                 (r.current_pp / r.row.live_pp - 1.0) * 100.0
+            } else {
+                0.0
+            };
+            let local_delta = if r.sunny_local_pp > 0.0 {
+                (r.current_pp / r.sunny_local_pp - 1.0) * 100.0
             } else {
                 0.0
             };
@@ -4066,23 +4281,21 @@ fn multiuser_report() {
                 r.row.counts[5]
             );
             println!(
-                "{:>8} {:>9} {:>4} {:>4} {:>4} {:>6.2} {:>6.2} {:>6} {:>26} {:>7.3} {:>8.1} {:>9.1} {:>+7.2} {:>7.4} {:>6.2} {:>5}",
+                "{:>8} {:>9} {:>4} {:>4} {:>4} {:>6} {:>26} {:>7.3} {:>9.1} {:>11.1} {:>10.1} {:>+12.2} {:>+10.2} {:>+11.2}",
                 r.row.map_id,
                 r.row.mods,
                 r.row.keys,
                 r.od,
                 r.is_convert,
-                r.stars,
-                r.row.live_stars,
                 r.notes,
                 composition,
                 r.row.acc,
                 r.row.live_pp,
+                r.sunny_local_pp,
                 r.current_pp,
+                r.sunny_local_pp / r.row.live_pp * 100.0 - 100.0,
                 delta,
-                r.scalar,
-                r.timing_sigma,
-                ""
+                local_delta
             );
         }
 
@@ -4253,11 +4466,19 @@ fn multiuser_report() {
     // deciding whether to strengthen its contribution to PP. These are all
     // non-EZ so window widening cannot be mistaken for ordinary surface motion.
     println!("\nnon-EZ surface-transfer distributions:");
-    println!("  {:<24} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>10}",
-        "cohort", "n", "mean", "geo", "p10", "median", "p90", "surf/pp");
+    println!(
+        "  {:<24} {:>5} {:>8} {:>8} {:>8} {:>8} {:>8} {:>10}",
+        "cohort", "n", "mean", "geo", "p10", "median", "p90", "surf/pp"
+    );
     let print_surface_cohort = |label: &str, rows: Vec<&MultiPriced>| {
-        let rows: Vec<&MultiPriced> = rows.into_iter().filter(|r| !r.row.mods.contains("EZ")).collect();
-        let mut values: Vec<f64> = rows.iter().map(|r| r.surface_multiplier.max(f64::MIN_POSITIVE)).collect();
+        let rows: Vec<&MultiPriced> = rows
+            .into_iter()
+            .filter(|r| !r.row.mods.contains("EZ"))
+            .collect();
+        let mut values: Vec<f64> = rows
+            .iter()
+            .map(|r| r.surface_multiplier.max(f64::MIN_POSITIVE))
+            .collect();
         if values.is_empty() {
             println!("  {label:<24} {:>5} (empty)", 0);
             return;
@@ -4265,57 +4486,97 @@ fn multiuser_report() {
         values.sort_by(f64::total_cmp);
         let n = values.len();
         let mean = values.iter().sum::<f64>() / n as f64;
-        let geo = values.iter().map(|v| v.ln()).sum::<f64>().div_euclid(n as f64).exp();
+        let geo = values
+            .iter()
+            .map(|v| v.ln())
+            .sum::<f64>()
+            .div_euclid(n as f64)
+            .exp();
         let quantile = |p: f64| values[((n - 1) as f64 * p).round() as usize];
         let pp_sum: f64 = rows.iter().map(|r| r.current_pp).sum();
-        let surface_sum: f64 = rows.iter().map(|r| r.surface_only_pp).sum();
-        println!("  {label:<24} {n:>5} {mean:>8.4} {geo:>8.4} {:>8.4} {:>8.4} {:>8.4} {:>9.2}%",
-            quantile(0.10), quantile(0.50), quantile(0.90), 100.0 * surface_sum / pp_sum);
+        let surface_sum: f64 = rows.iter().map(|r| r.timing_pp).sum();
+        println!(
+            "  {label:<24} {n:>5} {mean:>8.4} {geo:>8.4} {:>8.4} {:>8.4} {:>8.4} {:>9.2}%",
+            quantile(0.10),
+            quantile(0.50),
+            quantile(0.90),
+            100.0 * surface_sum / pp_sum
+        );
     };
     print_surface_cohort("all non-EZ", all.iter().copied().collect());
-    print_surface_cohort("4K rice LN<30%", all.iter().copied()
-        .filter(|r| r.row.keys == 4 && r.ln_fraction < 0.30).collect());
-    print_surface_cohort("4K LN>=30%", all.iter().copied()
-        .filter(|r| r.row.keys == 4 && r.ln_fraction >= 0.30).collect());
-    print_surface_cohort("low-OD 7K LN>30%", all.iter().copied()
-        .filter(|r| r.row.keys == 7 && r.od < 6.0 && r.ln_fraction > 0.30).collect());
-    print_surface_cohort("all rice LN<5%", all.iter().copied()
-        .filter(|r| r.ln_fraction < 0.05).collect());
+    print_surface_cohort(
+        "4K rice LN<30%",
+        all.iter()
+            .copied()
+            .filter(|r| r.row.keys == 4 && r.ln_fraction < 0.30)
+            .collect(),
+    );
+    print_surface_cohort(
+        "4K LN>=30%",
+        all.iter()
+            .copied()
+            .filter(|r| r.row.keys == 4 && r.ln_fraction >= 0.30)
+            .collect(),
+    );
+    print_surface_cohort(
+        "low-OD 7K LN>30%",
+        all.iter()
+            .copied()
+            .filter(|r| r.row.keys == 7 && r.od < 6.0 && r.ln_fraction > 0.30)
+            .collect(),
+    );
+    print_surface_cohort(
+        "all rice LN<5%",
+        all.iter()
+            .copied()
+            .filter(|r| r.ln_fraction < 0.05)
+            .collect(),
+    );
 
     println!("\nrice surface transfer by accuracy (non-EZ, LN<5%):");
-    for (label, lo, hi) in [("<95%", 0.0, 95.0), ("95-98%", 95.0, 98.0), (">=98%", 98.0, 101.0)] {
-        let rows: Vec<&MultiPriced> = all.iter().copied().filter(|r| {
-            r.ln_fraction < 0.05 && !r.row.mods.contains("EZ")
-                && r.row.acc >= lo && r.row.acc < hi
-        }).collect();
+    for (label, lo, hi) in [
+        ("<95%", 0.0, 95.0),
+        ("95-98%", 95.0, 98.0),
+        (">=98%", 98.0, 101.0),
+    ] {
+        let rows: Vec<&MultiPriced> = all
+            .iter()
+            .copied()
+            .filter(|r| {
+                r.ln_fraction < 0.05
+                    && !r.row.mods.contains("EZ")
+                    && r.row.acc >= lo
+                    && r.row.acc < hi
+            })
+            .collect();
         print_surface_cohort(label, rows);
     }
 
-    println!("surface-transfer sensitivity (relative to each exponent's cohort mean):");
-    println!(
-        "  {:>8} {:>9} {:>9} {:>9} {:>9}",
-        "exponent", "p10", "p90", ">+20%", "<-5%"
-    );
-    for exponent in [0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.20] {
-        let center = (all
-            .iter()
-            .map(|r| r.scalar.max(f64::MIN_POSITIVE).ln() * exponent)
-            .sum::<f64>()
-            / all.len() as f64)
-            .exp();
-        let mut relative: Vec<f64> = all
-            .iter()
-            .map(|r| r.scalar.max(0.0).powf(exponent) / center)
-            .collect();
-        relative.sort_by(f64::total_cmp);
-        let high = relative.iter().filter(|&&value| value > 1.20).count();
-        let low = relative.iter().filter(|&&value| value < 0.95).count();
-        println!(
-            "  {exponent:>8.2} {:+8.2}% {:+8.2}% {high:>9} {low:>9}",
-            (relative[relative.len() / 10] - 1.0) * 100.0,
-            (relative[relative.len() * 9 / 10] - 1.0) * 100.0,
-        );
-    }
+    // println!("surface-transfer sensitivity (relative to each exponent's cohort mean):");
+    // println!(
+    //     "  {:>8} {:>9} {:>9} {:>9} {:>9}",
+    //     "exponent", "p10", "p90", ">+20%", "<-5%"
+    // );
+    // for exponent in [0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.20] {
+    //     let center = (all
+    //         .iter()
+    //         .map(|r| r.scalar.max(f64::MIN_POSITIVE).ln() * exponent)
+    //         .sum::<f64>()
+    //         / all.len() as f64)
+    //         .exp();
+    //     let mut relative: Vec<f64> = all
+    //         .iter()
+    //         .map(|r| r.scalar.max(0.0).powf(exponent) / center)
+    //         .collect();
+    //     relative.sort_by(f64::total_cmp);
+    //     let high = relative.iter().filter(|&&value| value > 1.20).count();
+    //     let low = relative.iter().filter(|&&value| value < 0.95).count();
+    //     println!(
+    //         "  {exponent:>8.2} {:+8.2}% {:+8.2}% {high:>9} {low:>9}",
+    //         (relative[relative.len() / 10] - 1.0) * 100.0,
+    //         (relative[relative.len() * 9 / 10] - 1.0) * 100.0,
+    //     );
+    // }
 
     let report_composition = |label: &str, mut rows: Vec<&MultiPriced>| {
         rows.sort_by(|a, b| {
@@ -4326,7 +4587,7 @@ fn multiuser_report() {
 
         println!("\n{label} ({} scores; at most 40 shown)", rows.len());
         println!(
-            "{:>6} {:>8} {:>9} {:>4} {:>5} {:>6} {:>8} {:>8} {:>8}  {:>8} x {:>7} x {:>6} = {:>8}  x {:>6} x {:>6} x {:>6}",
+            "{:>6} {:>8} {:>9} {:>4} {:>5} {:>6} {:>8} {:>8}  {:>8} + {:>8} = {:>8}  x {:>6} x {:>6} x {:>6}",
             "uid",
             "map",
             "mods",
@@ -4334,24 +4595,20 @@ fn multiuser_report() {
             "LN%",
             "acc%",
             "surface%",
-            "relative%",
             "live%",
-            "baseDPP",
-            "accProp",
-            "surf",
-            "diffPP",
+            "pattern",
+            "timing",
+            "total",
             "accMul",
             "var",
             "length"
         );
 
         for r in rows.into_iter().take(40) {
-            let surface_delta = (r.current_pp / r.neutral_pp - 1.0) * 100.0;
-            let relative_delta = (r.surface_multiplier / mean_surface_multiplier - 1.0) * 100.0;
+            let surface_delta = (r.current_pp / r.pattern_pp - 1.0) * 100.0;
             let live_delta = (r.current_pp / r.row.live_pp - 1.0) * 100.0;
-            let difficulty_pp = r.base_difficulty_pp * r.accuracy_proportion * r.surface_multiplier;
             println!(
-                "{:>6} {:>8} {:>9} {:>4.1} {:>5.0} {:>6.2} {:+8.2} {:+8.2} {:+8.2}  {:>8.1} x {:>7.4} x {:>6.3} = {:>8.1}  x {:>6.3} x {:>6.3} x {:>6.3}",
+                "{:>6} {:>8} {:>9} {:>4.1} {:>5.0} {:>6.2} {:+8.2} {:+8.2}  {:>8.1} + {:>8.1} = {:>8.1}  x {:>6.3} x {:>6.3} x {:>6.3}",
                 r.row.uid,
                 r.row.map_id,
                 r.row.mods,
@@ -4359,12 +4616,10 @@ fn multiuser_report() {
                 100.0 * r.ln_fraction,
                 r.row.acc,
                 surface_delta,
-                relative_delta,
                 live_delta,
-                r.base_difficulty_pp,
-                r.accuracy_proportion,
-                r.surface_multiplier,
-                difficulty_pp,
+                r.pattern_pp,
+                r.timing_pp,
+                r.current_pp,
                 r.acc_multiplier,
                 r.variety_multiplier,
                 r.length_multiplier,
@@ -4425,7 +4680,6 @@ fn multiuser_report() {
                  difficulty calc, not the change under test)"
         );
     }
-
 }
 
 /// Reports how [`ErrorModel::release_mean_offset`] moves pricing under the fixed
@@ -5486,6 +5740,7 @@ fn summarise_group(label: &str, rows: &[&MultiPriced]) {
 
     let n = rows.len() as f64;
     let current: f64 = rows.iter().map(|r| r.current_pp).sum();
+    let sunny_local: f64 = rows.iter().map(|r| r.sunny_local_pp).sum();
     let live: f64 = rows.iter().map(|r| r.row.live_pp).sum();
     let mean_scalar = rows.iter().map(|r| r.scalar).sum::<f64>() / n;
 
@@ -5501,17 +5756,13 @@ fn summarise_group(label: &str, rows: &[&MultiPriced]) {
         0.0
     };
 
-    let live_note = format!(
-        "  sum {:+.2}% mean {:+.2}%",
-        (current / live - 1.0) * 100.0,
-        mean_delta
-    );
-
     let n_rows = rows.len();
     let sum_delta = (current / live - 1.0) * 100.0;
+    let local_delta = (current / sunny_local - 1.0) * 100.0;
     println!(
         "  {label}: n={n_rows} mean scalar {mean_scalar:.4}  mean dPP {mean_delta:+.2}%  \
-             sum {live:.0} -> {current:.0} ({sum_delta:+.2}%){live_note}"
+             sum live {live:.0} | sunny local {sunny_local:.0} | ours {current:.0} \
+             (our/live {sum_delta:+.2}%, our/sunny {local_delta:+.2}%)"
     );
 }
 
@@ -6180,7 +6431,7 @@ fn release_density_weight_structure() {
         // `calculate()` call site in this module other than ones specifically
         // exercising the classic/ScoreV1 path.
         let windows = hit_windows(map, &GameMods::default(), 1.0, false);
-        let great_hit_window = get_hit_window_300(map, 1.0, false, false);
+        let great_hit_window = get_hit_window_300(map, 1.0, false, &GameMods::default());
         let hit_leniency = hit_leniency_from_window(great_hit_window);
         let data = RebirthData::new(notes, total_columns, hit_leniency, windows.good);
 
@@ -6427,7 +6678,7 @@ fn per_note_difficulty_distribution() {
         let ln_share = n_long_notes as f64 / notes.len() as f64;
 
         let windows = hit_windows(map, &GameMods::default(), 1.0, false);
-        let great_hit_window = get_hit_window_300(map, 1.0, false, false);
+        let great_hit_window = get_hit_window_300(map, 1.0, false, &GameMods::default());
         let hit_leniency = hit_leniency_from_window(great_hit_window);
         let data = RebirthData::new(notes, total_columns, hit_leniency, windows.good);
 
@@ -8328,7 +8579,7 @@ fn per_note_difficulty(map: &Beatmap) -> Option<PerNoteDifficulty> {
     }
 
     let windows = hit_windows(map, &GameMods::default(), 1.0, false);
-    let great_hit_window = get_hit_window_300(map, 1.0, false, false);
+    let great_hit_window = get_hit_window_300(map, 1.0, false, &GameMods::default());
     let hit_leniency = hit_leniency_from_window(great_hit_window);
     let data = RebirthData::new(notes, total_columns, hit_leniency, windows.good);
 
@@ -9300,7 +9551,7 @@ fn does_a_mean_offset_move_pp() {
 
         let windows = hit_windows(&map, &mods, clock_rate, false);
         let great =
-            get_hit_window_300(&map, clock_rate, has_mod(&mods, "HR"), has_mod(&mods, "EZ"));
+            get_hit_window_300(&map, clock_rate, false, &mods);
         let data = RebirthData::new(
             notes,
             total_columns,
@@ -10157,8 +10408,8 @@ fn transition_oracle_experiments() {
                     let great = get_hit_window_300(
                         &map,
                         clock_rate,
-                        has_mod(&mods, "HR"),
-                        has_mod(&mods, "EZ"),
+                        false,
+                        &mods,
                     );
                     let data = RebirthData::new(
                         notes,

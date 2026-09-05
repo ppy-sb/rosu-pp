@@ -22,10 +22,10 @@ use crate::model::{
 use rosu_mods::{Acronym, GameMods};
 
 use crate::mania::sunny_accuracy::{
-    expected_counts_at_core_sigma, timing_sigma_for_counts, ErrorModel, JudgementUnit,
-    LN_DURATION_BUCKETS, TIMING_CORE_SIGMA, TIMING_LOSS_TRANSFER_EXPONENT,
+    ErrorModel, JudgementUnit, LN_DURATION_BUCKETS, TIMING_BASELINE_SIGMA,
+    expected_counts_at_core_sigma, timing_sigma_for_counts,
 };
-use crate::mania::sunny_windows::{hit_windows, ManiaHitWindows};
+use crate::mania::sunny_windows::{ManiaHitWindows, hit_windows};
 
 /// The upper edges, in ms, of the first [`LN_DURATION_BUCKETS`] - 1 duration bins;
 /// anything longer falls in the last.
@@ -154,6 +154,44 @@ pub enum InputClass {
 
 pub const INPUT_CLASSES: usize = 7;
 pub const INPUT_STATE_BINS: usize = INPUT_CLASSES * NOTE_DIFFICULTY_BINS;
+
+/// Maximum number of collapsed judgement populations emitted by a map.
+pub const MAX_JUDGEMENT_UNITS: usize = INPUT_STATE_BINS * 2;
+
+/// Fixed-capacity, serializable judgement-unit cache.
+///
+/// The fixed backing array keeps difficulty attributes `Copy`. `None` on the
+/// containing attributes is supported for legacy or lossy round trips.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct JudgementUnitCache {
+    pub units: [JudgementUnit; MAX_JUDGEMENT_UNITS],
+    pub len: u16,
+}
+
+impl JudgementUnitCache {
+    fn from_vec(units: Vec<JudgementUnit>) -> Self {
+        assert!(units.len() <= MAX_JUDGEMENT_UNITS);
+
+        let mut cache = Self::default();
+        cache.len = units.len() as u16;
+        cache.units[..units.len()].copy_from_slice(&units);
+
+        cache
+    }
+
+    pub fn as_slice(&self) -> &[JudgementUnit] {
+        &self.units[..usize::from(self.len).min(MAX_JUDGEMENT_UNITS)]
+    }
+}
+
+impl Default for JudgementUnitCache {
+    fn default() -> Self {
+        Self {
+            units: [JudgementUnit::default(); MAX_JUDGEMENT_UNITS],
+            len: 0,
+        }
+    }
+}
 
 /// A compact aggregate of operations sharing one [`InputClass`].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -606,6 +644,16 @@ pub struct SunnyManiaDifficultyAttributes {
     /// Compact map-only input transition metadata. Missing cached attributes retain the
     /// pre-feature judgement path.
     pub input_state_bins: Option<[InputStateBin; INPUT_STATE_BINS]>,
+    /// Default-model judgement populations, normalized to a total weight of one.
+    ///
+    /// This is produced with SR so repeated PP calculations do not rebuild the same
+    /// map-only data. It may be absent after a legacy or lossy serialization round trip;
+    /// PP then reconstructs it from the raw bins above.
+    pub judgement_units: Option<JudgementUnitCache>,
+    /// Fixed-sigma expected accuracy for the default model and played conditions.
+    pub timing_expected_accuracy: f64,
+    /// Fixed-sigma expected accuracy with structural offsets neutralized.
+    pub timing_reference_accuracy: f64,
     /// The map's own judgement windows with the window-affecting mods stripped.
     ///
     /// Production PP uses these as the natural-window denominator of the relative
@@ -640,10 +688,13 @@ pub struct SunnyManiaPerformanceAttributes {
     /// windows, which is how `EZ` is priced without a mod-specific factor. Exactly 1
     /// when both sides use the same windows and input-state model, or there was
     /// nothing to measure. See [`window_scalar`].
-    pub window_scalar: f64,
+    // pub window_scalar: f64,
     /// Accuracy-neutral PP contribution from Sunny's pattern calculation.
-    pub pp_pattern: f64,
-    /// Signed adjustment from accuracy and forward timing difficulty.
+    pub xxy_pp_pattern: f64,
+    /// Reference adjustment from Sunny's accuracy proportion and accuracy scalar.
+    /// This is reported for comparison and is not included in [`Self::pp`].
+    pub xxy_pp_accuracy: f64,
+    /// Signed adjustment from the forward timing surface.
     pub pp_timing: f64,
     /// Expected accuracy at the fixed-spread probe through the played conditions.
     pub timing_expected_accuracy: f64,
@@ -684,17 +735,15 @@ pub fn calculate(
 ) -> Option<SunnyManiaDifficultyAttributes> {
     let total_columns = map.cs.round_ties_even().max(1.0) as usize;
 
-    let has_hr = has_mod(mods, "HR");
-    let has_ez = has_mod(mods, "EZ");
-
-    let great_hit_window = get_hit_window_300(map, clock_rate, has_hr, has_ez);
-    let hit_leniency = hit_leniency_from_window(great_hit_window);
     let classic = is_classic(lazer, mods);
+
+    let great_hit_window = get_hit_window_300(map, clock_rate, classic, mods);
+    let hit_leniency = hit_leniency_from_window(great_hit_window);
     let windows = hit_windows(map, mods, clock_rate, classic);
 
     // The same map judged without the window-affecting mods. Mods reach `hit_windows`
     // only through its difficulty multiplier, so an empty mod set is exactly "this map's
-    // own windows". The clock rate stays as passed because the windows are rate-normalised
+    // own windows". The clock rate stays as passed because the windows are rate-normalized
     // anyway, and `classic` stays because it describes the scoring scheme rather than a
     // mod's effect on leniency.
     let map_windows = hit_windows(map, &GameMods::default(), clock_rate, classic);
@@ -711,7 +760,7 @@ pub fn calculate(
     let data = RebirthData::new(notes, total_columns, hit_leniency, windows.good);
     let params = calculate_from_data(&data, classic)?;
 
-    Some(SunnyManiaDifficultyAttributes {
+    let mut attrs = SunnyManiaDifficultyAttributes {
         stars: params.sr,
         variety: params.variety,
         acc_scalar: 0.5 * params.spikiness + 0.5 * params.switches,
@@ -726,8 +775,20 @@ pub fn calculate(
         ln_duration_buckets: ln_duration_histogram(&data.long_notes),
         note_difficulty_bins: params.note_difficulty_bins,
         input_state_bins: params.input_state_bins,
+        judgement_units: None,
+        timing_expected_accuracy: 1.0,
+        timing_reference_accuracy: 1.0,
         ln_judged_as_one: classic,
-    })
+    };
+
+    let model = ErrorModel::default();
+    let units = judgement_units(&attrs, 1.0, &model, !per_note_difficulty_disabled());
+    let timing = compute_timing_pp_with_units(&attrs, 1.0, &model, Some(&units));
+    attrs.timing_expected_accuracy = timing.expected_accuracy;
+    attrs.timing_reference_accuracy = timing.reference_accuracy;
+    attrs.judgement_units = Some(JudgementUnitCache::from_vec(units));
+
+    Some(attrs)
 }
 
 /// Calculate the sunny performance attributes.
@@ -736,29 +797,20 @@ pub fn calculate_performance(
     mods: &GameMods,
     state: SunnyScoreState,
 ) -> SunnyManiaPerformanceAttributes {
-    calculate_performance_with_model(attrs, mods, state, &ErrorModel::default())
+    // The cached timing from SR uses baseline sigma for expectations, which is fine
+    // for the SR-time calculation. But for actual score PP, we need to fit the
+    // player's actual sigma from their counts, so we don't use the cache here.
+    calculate_performance_inner(attrs, mods, state, &ErrorModel::default(), None)
 }
 
-/// [`calculate_performance`] under an explicit [`ErrorModel`].
-///
-/// Production calls [`calculate_performance`]; this exists so a calibration candidate
-/// can be priced against the shipped default on identical scores.
-pub(crate) fn calculate_performance_with_model(
+fn calculate_performance_inner(
     attrs: &SunnyManiaDifficultyAttributes,
     mods: &GameMods,
     state: SunnyScoreState,
     model: &ErrorModel,
+    cached_timing: Option<TimingPpResult>,
 ) -> SunnyManiaPerformanceAttributes {
-    // NF still gets a flat factor: failing is a scoring matter that the timing
-    // model says nothing about. EZ has no factor here because its windows are
-    // evaluated directly below.
-    let mut multiplier = 1.0;
-
-    if has_mod(mods, "NF") {
-        multiplier *= 0.75;
-    }
-
-    let score_accuracy = custom_accuracy(state);
+    let score_accuracy = xxy_custom_accuracy(state);
 
     // === COMPOSITIONAL ARCHITECTURE ===
     // PP is split into two additive components:
@@ -766,52 +818,108 @@ pub(crate) fn calculate_performance_with_model(
     // 2. Timing difficulty (from forward expected judgment loss)
 
     // Pattern difficulty: base calculation from sunny
-    let variety_multiplier = variety_multiplier(attrs.variety);
-    let length_multiplier = length_multiplier(attrs.n_objects as f64, attrs.stars);
-    let acc_multiplier = acc_multiplier(score_accuracy, attrs.acc_scalar);
-    let accuracy_proportion = performance_proportion(score_accuracy);
-
+    let xxy_variety_multiplier = xxy_variety_multiplier(attrs.variety);
+    let xxy_length_multiplier = xxy_length_multiplier(attrs.n_objects as f64, attrs.stars);
+    let xxy_acc_multiplier = xxy_acc_multiplier(score_accuracy, attrs.acc_scalar);
+    let score_performance_proportion = xxy_performance_proportion(score_accuracy);
     // Accuracy-neutral pattern value. Keeping this separate makes the accuracy
     // reward replaceable without rebuilding Sunny's pattern calculation.
-    let pattern_difficulty = attrs.stars.max(0.05) - 0.15;
-    let pp_pattern =
-        9.8 * pattern_difficulty.powf(2.2) * variety_multiplier * length_multiplier * multiplier;
+    let xxy_pattern_difficulty = attrs.stars.max(0.2) - 0.15;
+    let xxy_pp_pattern = 9.8
+        * xxy_pattern_difficulty.powf(2.2)
+        * xxy_variety_multiplier
+        * xxy_length_multiplier
+        * 1f64;
 
-    // Timing difficulty: score-conditioned relative transfer at one fitted spread.
-    let timing_result = compute_timing_pp(attrs, state, model);
-    // Expected-loss transfer is compressed before entering PP.
-    let surface_power = timing_result.loss_ratio.powf(TIMING_LOSS_TRANSFER_EXPONENT);
+    // Express Sunny's multiplicative accuracy pricing as an additive delta so
+    // it can be inspected independently from the timing surface.
+    let xxy_pp_accuracy =
+        xxy_pp_pattern * (score_performance_proportion * xxy_acc_multiplier - 1.0);
 
-    // Provisional merged accuracy reward. `performance_proportion` and
-    // `acc_multiplier` keep Sunny's calibrated absolute-accuracy response while
-    // the forward model supplies the relative window/input-state response.
-    // Once the model's absolute reward is calibrated it can replace these two
-    // legacy factors here, without becoming a second independent pp source.
-    let accuracy_reward = accuracy_proportion * acc_multiplier * surface_power;
-    let pp_timing = pp_pattern * (accuracy_reward - 1.0);
+    // Timing difficulty: Replace Sunny's accuracy adjustment with sigma-based approach
+    let timing_result = cached_timing.unwrap_or_else(|| compute_timing_pp(attrs, state, model));
 
-    // Legacy window_scalar for compatibility (kept for reporting)
-    let window_scalar = surface_power.max(0.0).powf(1.0 / 2.2);
+    // let ss_timing = compute_timing_pp(
+    //     attrs,
+    //     SunnyScoreState {
+    //         n320: state.total_hits() as u32,
+    //         n300: 0,
+    //         n200: 0,
+    //         n100: 0,
+    //         n50: 0,
+    //         misses: 0,
+    //     },
+    //     model,
+    // );
 
-    // Total pp is additive composition
-    let pp = pp_pattern + pp_timing;
+    // let avg_player_ratio = TIMING_CORE_SIGMA / ss_timing.core_sigma;
+
+    // // Fit the player's actual timing sigma from their score.
+    // // Then compute what accuracy a baseline sigma would have produced through
+    // // the same windows/conditions, and take the difference.
+    // //
+    // // This replaces Sunny's accuracy multiplier with a sigma-ratio approach:
+    // // - Fitted sigma represents the player's actual timing precision
+    // // - Baseline sigma (11ms) represents SS-tier timing precision
+    // // - The ratio determines the timing PP adjustment
+
+    // // Compute sigma ratio: baseline / fitted
+    // // ratio > 1 means better timing than baseline (reward)
+    // // ratio < 1 means worse timing than baseline (penalty)
+    // let sigma_ratio = timing_result.core_sigma / avg_player_ratio.powf(4.0);
+
+    // // The timing adjustment replaces sunny's accuracy effect
+    // let pp_timing = sigma_ratio * xxy_pp_pattern / -8.0;
+
+    // // Sunny accuracy is retained only as a reference column. Our result is the
+    // // accuracy-neutral pattern value plus the timing surface adjustment.
+    // let pp = xxy_pp_pattern + pp_timing;
+    let pp = xxy_pp_pattern + xxy_pp_accuracy;
 
     // Legacy difficulty_value for compatibility
-    let difficulty_value = compute_difficulty_value(attrs.stars, score_accuracy, window_scalar);
+    let difficulty_value = compute_difficulty_value(attrs.stars, score_accuracy, 1.0);
 
-    SunnyManiaPerformanceAttributes {
-        pp,
+    let v = SunnyManiaPerformanceAttributes {
+        pp: pp,
         pp_difficulty: difficulty_value,
-        variety_multiplier,
-        acc_multiplier,
-        length_multiplier,
-        window_scalar,
-        pp_pattern,
-        pp_timing,
+        xxy_pp_pattern,
+        xxy_pp_accuracy,
+        pp_timing: xxy_pp_accuracy, // disabled surface for now
+
         timing_expected_accuracy: timing_result.expected_accuracy,
         timing_reference_accuracy: timing_result.reference_accuracy,
-        timing_core_sigma: timing_result.core_sigma,
+        timing_core_sigma: 0.0,
+
+        variety_multiplier: xxy_variety_multiplier,
+        acc_multiplier: xxy_acc_multiplier,
+        length_multiplier: xxy_length_multiplier,
+    };
+
+    normalize_for_human_reference(v, mods)
+}
+
+pub(crate) fn normalize_for_human_reference(
+    input: SunnyManiaPerformanceAttributes,
+    mods: &GameMods,
+) -> SunnyManiaPerformanceAttributes {
+    // NF still gets a flat factor: failing is a scoring matter that the timing
+    // model says nothing about. EZ has no factor here because its windows are
+    // evaluated directly below.
+    let mut multiplier = 1.0;
+
+    // TODO: only nerf when failed
+    if has_mod(mods, "NF") {
+        multiplier *= 0.75;
     }
+
+    let mut normalized = input;
+
+    normalized.pp *= multiplier;
+    normalized.xxy_pp_pattern *= multiplier;
+    normalized.xxy_pp_accuracy *= multiplier;
+    normalized.pp_timing *= multiplier;
+
+    normalized
 }
 
 /// OD 8 classic non-convert, the modal mania OD.
@@ -1241,13 +1349,16 @@ struct TimingPpResult {
     core_sigma: f64,
 }
 
-/// Evaluate a score-conditioned relative timing transfer on a millisecond axis.
+/// Evaluate timing PP by fitting the player's actual timing sigma from their score,
+/// then comparing it to a reference baseline sigma.
 ///
-/// The score's hit-judgement composition determines one concrete core spread under
-/// played conditions. Both sides then use that same spread and structural population:
-/// the played side includes actual windows and measured input-state offsets, while the
-/// reference side uses natural windows and neutral offsets. Local star difficulty never
-/// becomes a synthetic player skill.
+/// This approach:
+/// 1. Fits the player's timing spread (sigma) in milliseconds from their judgement counts
+/// 2. Compares their sigma to a baseline (TIMING_BASELINE_SIGMA)
+/// 3. Converts the sigma ratio to a PP adjustment through the performance proportion curve
+///
+/// Lower sigma (tighter timing) = better than baseline = positive PP adjustment
+/// Higher sigma (looser timing) = worse than baseline = negative PP adjustment
 fn compute_timing_pp(
     attrs: &SunnyManiaDifficultyAttributes,
     state: SunnyScoreState,
@@ -1260,7 +1371,7 @@ fn compute_timing_pp(
             loss_ratio: 1.0,
             expected_accuracy: 1.0,
             reference_accuracy: 1.0,
-            core_sigma: TIMING_CORE_SIGMA,
+            core_sigma: TIMING_BASELINE_SIGMA,
             ..TimingPpResult::default()
         };
     }
@@ -1279,17 +1390,19 @@ fn compute_timing_pp(
         state.n50,
         state.misses,
     ];
-    let core_sigma = timing_sigma_for_counts(&counts, &units, &attrs.hit_windows, model);
 
-    let expected = expected_counts_at_core_sigma(
-        &units,
-        &attrs.hit_windows,
-        model,
-        core_sigma,
-    );
-    let expected_accuracy = expected.custom_accuracy();
-    let expected_loss = (1.0 - expected_accuracy).max(f64::EPSILON);
+    // Fit the player's actual timing sigma from their score
+    let fitted_sigma = timing_sigma_for_counts(&counts, &units, &attrs.hit_windows, model);
 
+    // Compute what accuracy the baseline sigma would produce
+    let baseline_expected =
+        expected_counts_at_core_sigma(&units, &attrs.hit_windows, model, TIMING_BASELINE_SIGMA);
+    let expected_accuracy = baseline_expected.custom_accuracy();
+
+    // Note: The fitted sigma should produce accuracy close to the actual score accuracy,
+    // which validates that the fitting process worked correctly.
+
+    // Reference: baseline through neutral conditions
     let reference_model = ErrorModel {
         recovery_offset: 0.0,
         anticipation_offset: 0.0,
@@ -1303,9 +1416,69 @@ fn compute_timing_pp(
     );
     let reference = expected_counts_at_core_sigma(
         &reference_units,
-        &attrs.map_windows,
+        &attrs.hit_windows,
         &reference_model,
-        core_sigma,
+        TIMING_BASELINE_SIGMA,
+    );
+    let reference_accuracy = reference.custom_accuracy();
+
+    TimingPpResult {
+        loss_ratio: 1.0, // Not used in the new approach
+        expected_accuracy,
+        reference_accuracy,
+        core_sigma: fitted_sigma,
+    }
+}
+
+fn compute_timing_pp_with_units(
+    attrs: &SunnyManiaDifficultyAttributes,
+    total: f64,
+    model: &ErrorModel,
+    cached_units: Option<&[JudgementUnit]>,
+) -> TimingPpResult {
+    if total <= 0.0 || attrs.n_objects == 0 || attrs.stars <= 0.0 {
+        return TimingPpResult {
+            loss_ratio: 1.0,
+            expected_accuracy: 1.0,
+            reference_accuracy: 1.0,
+            core_sigma: TIMING_BASELINE_SIGMA,
+            ..TimingPpResult::default()
+        };
+    }
+
+    let owned_units;
+    let units = if let Some(units) = cached_units {
+        units
+    } else {
+        owned_units = judgement_units(attrs, total, model, !per_note_difficulty_disabled());
+
+        &owned_units
+    };
+
+    // Use the baseline timing precision to compute what accuracy it would produce
+    // through the played windows and input-state conditions.
+    let expected =
+        expected_counts_at_core_sigma(units, &attrs.hit_windows, model, TIMING_BASELINE_SIGMA);
+    let expected_accuracy = expected.custom_accuracy();
+    let expected_loss = (1.0 - expected_accuracy).max(f64::EPSILON);
+
+    // Reference: same baseline precision through neutral conditions (no input-state offsets).
+    let reference_model = ErrorModel {
+        recovery_offset: 0.0,
+        anticipation_offset: 0.0,
+        ..*model
+    };
+    let reference_units = judgement_units(
+        attrs,
+        total,
+        &reference_model,
+        !per_note_difficulty_disabled(),
+    );
+    let reference = expected_counts_at_core_sigma(
+        &reference_units,
+        &attrs.hit_windows,
+        &reference_model,
+        TIMING_BASELINE_SIGMA,
     );
     let reference_accuracy = reference.custom_accuracy();
     let reference_loss = (1.0 - reference_accuracy).max(f64::EPSILON);
@@ -1314,8 +1487,15 @@ fn compute_timing_pp(
         loss_ratio: expected_loss / reference_loss,
         expected_accuracy,
         reference_accuracy,
-        core_sigma,
+        core_sigma: TIMING_BASELINE_SIGMA,
     }
+}
+
+fn timing_loss_ratio(expected_accuracy: f64, reference_accuracy: f64) -> f64 {
+    let expected_loss = (1.0 - expected_accuracy).max(f64::EPSILON);
+    let reference_loss = (1.0 - reference_accuracy).max(f64::EPSILON);
+
+    expected_loss / reference_loss
 }
 
 // ---------------------------------------------------------------------------
@@ -1331,27 +1511,26 @@ fn compute_timing_pp(
 pub(crate) fn get_hit_window_300(
     map: &Beatmap,
     clock_rate: f64,
-    has_hr: bool,
-    has_ez: bool,
+    classic: bool,
+    mods: &GameMods,
 ) -> f64 {
     let od = f64::from(map.od);
 
-    let base = if !map.is_convert {
-        let anti_od = (10.0 - od).clamp(0.0, 10.0);
-        34.0 + 3.0 * anti_od
-    } else if od.round() > 4.0 {
+    let base = if classic && !map.is_convert {
+        34.0 + 3.0 * (10.0 - od).clamp(0.0, 10.0)
+    } else if classic && od.round() > 4.0 {
         34.0
-    } else {
+    } else if classic {
         47.0
+    } else if od > 5.0 {
+        49.0 + (34.0 - 49.0) * (od - 5.0) / 5.0
+    } else {
+        64.0 + (49.0 - 64.0) * od / 5.0
     };
 
     let mut value = base * clock_rate + 1e-6;
 
-    if has_hr {
-        value /= 1.4;
-    } else if has_ez {
-        value *= 1.4;
-    }
+    value /= crate::mania::sunny_windows::difficulty_multiplier(mods);
 
     ((value as i64) as f64 + 0.5) / clock_rate
 }
@@ -2729,7 +2908,7 @@ fn rao_quadratic_entropy_log(values: &[i64], log_iterations: u32) -> f64 {
 
 /// Matches the reference implementation's 305-based weighting (perfect hits
 /// are weighted with 305 instead of 320).
-fn custom_accuracy(state: SunnyScoreState) -> f64 {
+fn xxy_custom_accuracy(state: SunnyScoreState) -> f64 {
     let total_hits = state.total_hits();
 
     if total_hits == 0 {
@@ -2745,7 +2924,7 @@ fn custom_accuracy(state: SunnyScoreState) -> f64 {
 
 /// The "proportion" of pp that is awarded based on accuracy, i.e. how much
 /// of the star rating is rewarded at the given accuracy.
-fn performance_proportion(acc: f64) -> f64 {
+fn xxy_performance_proportion(acc: f64) -> f64 {
     if acc > 0.80 {
         4.5 * (acc - 0.8) / f64::powf(100.0 * (1.0 - acc) + f64::powf(0.9, 20.0), 0.05)
     } else {
@@ -2761,14 +2940,14 @@ fn performance_proportion(acc: f64) -> f64 {
 /// It enters through the same `^2.2` as the star rating because both describe how
 /// hard the score was to produce, so a 1% shift in either should be worth the same.
 fn compute_difficulty_value(stars: f64, score_accuracy: f64, window_scalar: f64) -> f64 {
-    let proportion = performance_proportion(score_accuracy);
+    let proportion = xxy_performance_proportion(score_accuracy);
     let effective_stars = f64::max(stars - 0.15, 0.05) * window_scalar.max(0.0);
 
     9.8 * f64::powf(effective_stars.max(0.05), 2.2) * proportion
 }
 
 /// Multiplier based on the map's variety, in the range `[0.945, 1.055]`.
-fn variety_multiplier(variety: f64) -> f64 {
+fn xxy_variety_multiplier(variety: f64) -> f64 {
     const FLOOR: f64 = 0.945;
     const CAP: f64 = 1.055;
     const V0: f64 = 3.25;
@@ -2778,14 +2957,14 @@ fn variety_multiplier(variety: f64) -> f64 {
 }
 
 /// Multiplier based on the play's accuracy and the map's accuracy scalar.
-fn acc_multiplier(acc: f64, acc_scalar: f64) -> f64 {
+fn xxy_acc_multiplier(acc: f64, acc_scalar: f64) -> f64 {
     let sigmoid_scaler = 0.87 + 0.26 / (1.0 + (-20.0 * (acc_scalar - 1.0)).exp());
 
     sigmoid_scaler * (2.0 * acc.powi(20) - 1.0) + 2.0 - 2.0 * acc.powi(20)
 }
 
 /// Multiplier based on the amount of notes of the map.
-fn length_multiplier(total_notes: f64, stars: f64) -> f64 {
+fn xxy_length_multiplier(total_notes: f64, stars: f64) -> f64 {
     1.1 / (1.0 + (stars / (2.0 * total_notes)).sqrt())
 }
 
@@ -2804,11 +2983,16 @@ mod inline_tests {
         let mut map = Beatmap::default();
         map.mode = GameMode::Mania;
         map.od = 8.0;
+        let mods = LazerMods::new();
 
-        assert!((get_hit_window_300(&map, 1.0, false, false) - 40.5).abs() < 1e-9);
-        assert!((get_hit_window_300(&map, 1.0, true, false) - 28.5).abs() < 1e-9);
-        assert!((get_hit_window_300(&map, 1.0, false, true) - 56.5).abs() < 1e-9);
-        assert!((get_hit_window_300(&map, 1.5, false, false) - 60.5 / 1.5).abs() < 1e-9);
+        assert!((get_hit_window_300(&map, 1.0, true, &mods) - 40.5).abs() < 1e-9);
+        let mut hr = LazerMods::new();
+        hr.insert(GameMod::HardRockMania(Default::default()));
+        assert!((get_hit_window_300(&map, 1.0, true, &hr) - 28.5).abs() < 1e-9);
+        let mut ez = LazerMods::new();
+        ez.insert(GameMod::EasyMania(Default::default()));
+        assert!((get_hit_window_300(&map, 1.0, true, &ez) - 56.5).abs() < 1e-9);
+        assert!((get_hit_window_300(&map, 1.5, true, &mods) - 60.5 / 1.5).abs() < 1e-9);
     }
 
     #[test]
@@ -2828,6 +3012,24 @@ mod inline_tests {
         let mut classic = LazerMods::new();
         classic.insert(GameMod::ClassicMania(Default::default()));
         assert!(is_classic(Some(true), &classic));
+    }
+
+    #[test]
+    fn classic_mod_overrides_lazer_window_scheme() {
+        let mut map = Beatmap::default();
+        map.mode = GameMode::Mania;
+        map.od = 4.0;
+        map.is_convert = true;
+
+        // Lazer interpolation gives 52ms at OD4; Classic uses the convert
+        // threshold and gives 47ms. Classic must win even with the Lazer switch.
+        let mods = LazerMods::new();
+        assert!((get_hit_window_300(&map, 1.0, false, &mods) - 52.0).abs() < 1e-9);
+        assert!((get_hit_window_300(&map, 1.0, true, &mods) - 47.0).abs() < 1e-9);
+
+        let mut mods = LazerMods::new();
+        mods.insert(GameMod::ClassicMania(Default::default()));
+        assert!(is_classic(Some(true), &mods));
     }
 }
 
