@@ -819,109 +819,134 @@ fn calculate_performance_inner(
     let xxy_pp_accuracy =
         xxy_pp_pattern * (score_performance_proportion * xxy_acc_multiplier - 1.0);
 
-    // Timing difficulty: Count-based penalty approach
-    // Instead of fitting sigma (which collapses to floor for most scores),
-    // directly penalize each non-320 judgement based on its timing window.
-    //
-    // The idea: each judgement type represents a timing error within a specific window.
-    // We penalize proportionally to how far from perfect (320) the player was.
-    //
-    // Weight derivation: For a given sigma, the expected probability of landing in each
-    // window can be computed from the normal distribution. We invert this: given the
-    // observed counts, what's the timing penalty?
+    // Timing difficulty: Multi-sigma approach
+    // For each judgement type, find implied sigma, then aggregate with asymmetric penalties.
     let total_hits = state.total_hits() as f64;
     if total_hits == 0.0 {
         let pp_with_timing = xxy_pp_pattern + xxy_pp_accuracy;
         let pp = pp_with_timing;
         let difficulty_value = compute_difficulty_value(attrs.stars, score_accuracy, 1.0);
 
-        return normalize_for_human_reference(SunnyManiaPerformanceAttributes {
-            pp,
-            pp_difficulty: difficulty_value,
-            xxy_pp_pattern,
-            xxy_pp_accuracy,
-            pp_timing: 0.0,
-            timing_expected_accuracy: 1.0,
-            timing_reference_accuracy: 1.0,
-            timing_core_sigma: TIMING_BASELINE_SIGMA,
-            variety_multiplier: xxy_variety_multiplier,
-            acc_multiplier: 1.0,
-            length_multiplier: xxy_length_multiplier,
-        }, mods);
+        return normalize_for_human_reference(
+            SunnyManiaPerformanceAttributes {
+                pp,
+                pp_difficulty: difficulty_value,
+                xxy_pp_pattern,
+                xxy_pp_accuracy,
+                pp_timing: 0.0,
+                timing_expected_accuracy: 1.0,
+                timing_reference_accuracy: 1.0,
+                timing_core_sigma: TIMING_BASELINE_SIGMA,
+                variety_multiplier: xxy_variety_multiplier,
+                acc_multiplier: 1.0,
+                length_multiplier: xxy_length_multiplier,
+            },
+            mods,
+        );
     }
 
-    // Count-based timing penalty using full judgement distribution
-    // Each judgement type represents timing precision within specific windows.
-    // We weight each type by how much timing precision it reveals:
-    //
-    // Window widths (OD 8): PERFECT ±16.5ms, GREAT ±40.5ms, GOOD ±73.5ms, etc.
-    // A 320 means hitting within ±16.5ms (tight timing)
-    // A 300 means hitting within ±40.5ms but outside ±16.5ms (decent timing)
-    // A 200 means hitting within ±73.5ms but outside ±40.5ms (loose timing)
-    // And so on...
-    //
-    // We convert the judgement distribution into a quality score representing
-    // the probability-weighted timing precision, then map that to a multiplier.
+    // Get judgement units with input-state effects
+    let units = judgement_units(attrs, total_hits, model, !per_note_difficulty_disabled());
 
-    let total = total_hits;
+    // Baseline sigma - constant across all window widths
+    // expected_counts_at_core_sigma already accounts for window differences
+    // Set to 12ms to center clean scores around 1.0 multiplier
+    const BASELINE_SIGMA: f64 = 12.0;
+    const SIGMA_MIN: f64 = 5.0;
+    const SIGMA_MAX: f64 = 50.0;
 
-    // Compute ratios for each judgement type
-    let r320 = state.n320 as f64 / total;
-    let r300 = state.n300 as f64 / total;
-    let r200 = state.n200 as f64 / total;
-    let r100 = state.n100 as f64 / total;
-    let r50 = state.n50 as f64 / total;
-    let rmiss = state.misses as f64 / total;
+    // Get baseline expectations
+    let baseline_exp =
+        expected_counts_at_core_sigma(&units, &attrs.hit_windows, model, BASELINE_SIGMA);
+    let baseline_arr = baseline_exp.as_array();
 
-    // Quality weights based on window precision
-    // Higher weight = tighter timing required
-    // These approximate the relative probability mass for different sigma values
-    let w320 = 1.0;   // Tightest timing (±16.5ms window)
-    let w300 = 0.6;   // Good timing (±40.5ms window)
-    let w200 = 0.3;   // Decent timing (±73.5ms window)
-    let w100 = 0.1;   // Loose timing (±103.5ms window)
-    let w50 = 0.0;    // Very loose (±127.5ms window)
-    let wmiss = -0.2; // Penalty for complete misses
+    // For each judgement, find implied sigma
+    let obs_counts = [
+        state.n320 as f64,
+        state.n300 as f64,
+        state.n200 as f64,
+        state.n100 as f64,
+        state.n50 as f64,
+        state.misses as f64,
+    ];
 
-    // Weighted quality score: higher = tighter timing
-    let quality_score = (
-        r320 * w320 +
-        r300 * w300 +
-        r200 * w200 +
-        r100 * w100 +
-        r50 * w50 +
-        rmiss * wmiss
-    );
+    let mut deviations = [0.0; 6];
+    let weights = [1.0, 0.6, 0.3, 0.1, 0.05, 0.5]; // judgement importance
 
-    // Convert quality score to multiplier
-    // quality ~1.0 (mostly 320s) → 1.15× reward
-    // quality ~0.6 (mostly 300s) → 1.0× neutral
-    // quality ~0.3 (mix of 300/200) → 0.85× penalty
-    // quality ~0.0 (mostly 200/100) → 0.7× floor
-    let timing_multiplier = (0.55 + quality_score * 0.6).clamp(0.7, 1.15);
+    for i in 0..6 {
+        if obs_counts[i] < 1.0 {
+            continue; // skip if no counts
+        }
+
+        let obs_ratio = obs_counts[i] / total_hits;
+        let expected_ratio = baseline_arr[i] / total_hits;
+
+        // Binary search for sigma that produces this ratio
+        let implied_sigma = find_sigma_for_judgement_ratio(
+            obs_ratio,
+            i,
+            &units,
+            &attrs.hit_windows,
+            model,
+            total_hits,
+        )
+        .clamp(SIGMA_MIN, SIGMA_MAX);
+
+        // Deviation from baseline
+        let mut dev = BASELINE_SIGMA - implied_sigma;
+
+        // Asymmetric: penalties 1.5x harsher
+        if dev < 0.0 {
+            dev *= 1.5;
+        }
+
+        deviations[i] = dev;
+    }
+
+    // Weighted average deviation
+    let weighted_dev: f64 = deviations
+        .iter()
+        .zip(obs_counts.iter())
+        .zip(weights.iter())
+        .map(|((dev, count), weight)| dev * count * weight)
+        .sum();
+    let total_weight: f64 = obs_counts
+        .iter()
+        .zip(weights.iter())
+        .map(|(count, weight)| count * weight)
+        .sum();
+
+    let avg_deviation = if total_weight > 0.0 {
+        weighted_dev / total_weight
+    } else {
+        0.0
+    };
+
+    // Map to multiplier - scale 0.02 for wider range without hitting clamps
+    // avg_deviation range roughly [-30, +10] ms → multiplier range [0.4, 1.2] before clamp
+    let timing_multiplier = (1.0 + avg_deviation * 0.02).clamp(0.7, 1.15);
+
+    let xxy_pp = xxy_pp_pattern + xxy_pp_accuracy;
 
     // Apply timing multiplier on top of Sunny's accuracy system
-    let pp_with_timing = (xxy_pp_pattern + xxy_pp_accuracy) * timing_multiplier;
+    let pp_with_timing = xxy_pp * timing_multiplier;
 
     // Use timing-based PP as the main result
     let pp = pp_with_timing;
 
-    // Legacy difficulty_value for compatibility
-    let difficulty_value = compute_difficulty_value(attrs.stars, score_accuracy, 1.0);
-
     let v = SunnyManiaPerformanceAttributes {
         pp,
-        pp_difficulty: difficulty_value,
+        pp_difficulty: attrs.stars,
         xxy_pp_pattern,
         xxy_pp_accuracy,
-        pp_timing: pp_with_timing - (xxy_pp_pattern + xxy_pp_accuracy), // timing adjustment on top of accuracy
+        pp_timing: pp_with_timing - xxy_pp,
 
-        timing_expected_accuracy: score_accuracy, // simplified for count-based approach
-        timing_reference_accuracy: score_accuracy,
-        timing_core_sigma: (1.0 - quality_score) * 30.0, // approximate sigma from quality
+        timing_expected_accuracy: baseline_exp.custom_accuracy(),
+        timing_reference_accuracy: baseline_exp.custom_accuracy(),
+        timing_core_sigma: BASELINE_SIGMA,
 
         variety_multiplier: xxy_variety_multiplier,
-        acc_multiplier: timing_multiplier, // now represents timing multiplier
+        acc_multiplier: timing_multiplier,
         length_multiplier: xxy_length_multiplier,
     };
 
@@ -1512,11 +1537,51 @@ fn compute_timing_pp_with_units(
     }
 }
 
-fn timing_loss_ratio(expected_accuracy: f64, reference_accuracy: f64) -> f64 {
-    let expected_loss = (1.0 - expected_accuracy).max(f64::EPSILON);
-    let reference_loss = (1.0 - reference_accuracy).max(f64::EPSILON);
+fn find_sigma_for_judgement_ratio(
+    target_ratio: f64,
+    judgement_idx: usize,
+    units: &[JudgementUnit],
+    hit_windows: &ManiaHitWindows,
+    model: &ErrorModel,
+    total_hits: f64,
+) -> f64 {
+    const SIGMA_MIN: f64 = 5.0;
+    const SIGMA_MAX: f64 = 50.0;
+    const EPSILON: f64 = 0.001;
 
-    expected_loss / reference_loss
+    let mut low = SIGMA_MIN;
+    let mut high = SIGMA_MAX;
+
+    for _ in 0..30 {
+        let mid = (low + high) / 2.0;
+        let expected = expected_counts_at_core_sigma(units, hit_windows, model, mid);
+        let arr = expected.as_array();
+        let ratio = arr[judgement_idx] / total_hits;
+
+        if (ratio - target_ratio).abs() < EPSILON {
+            return mid;
+        }
+
+        // Lower sigma = tighter = more 320s, fewer misses
+        // Higher sigma = looser = fewer 320s, more misses
+        if judgement_idx == 0 {
+            // 320s: want more → decrease sigma
+            if ratio < target_ratio {
+                high = mid;
+            } else {
+                low = mid;
+            }
+        } else {
+            // Other judgements: want more → increase sigma
+            if ratio < target_ratio {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+    }
+
+    (low + high) / 2.0
 }
 
 // ---------------------------------------------------------------------------

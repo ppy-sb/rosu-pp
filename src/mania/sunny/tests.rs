@@ -743,20 +743,20 @@ EZ pattern={:.6} timing={:.6} pp={:.6} scalar={:.6} expected={:.6}",
         perf_nm.xxy_pp_pattern,
         perf_nm.pp_timing,
         perf_nm.pp,
-        1.0f64, /* window_scalar leftover */
+        perf_nm.acc_multiplier,
         perf_nm.timing_expected_accuracy,
         perf_ez.xxy_pp_pattern,
         perf_ez.pp_timing,
         perf_ez.pp,
-        1.0f64, /* window_scalar leftover */
+        perf_ez.acc_multiplier,
         perf_ez.timing_expected_accuracy
     );
 
     assert!(
-        1.0f64 /* window_scalar leftover */ < 1.0f64, /* window_scalar leftover */
+        perf_ez.acc_multiplier < perf_nm.acc_multiplier,
         "wider windows must lower the forward timing value relative to NM: {} vs {}",
-        1.0f64, /* window_scalar leftover */
-        1.0f64  /* window_scalar leftover */
+        perf_ez.acc_multiplier,
+        perf_nm.acc_multiplier
     );
 
     assert!(
@@ -802,9 +802,9 @@ fn hr_is_rewarded_by_the_same_mechanism() {
     let perf_hr = calculate_performance(&hr, &hr_mods, state);
 
     assert!(
-        1.0f64 /* window_scalar leftover */ > 1.0,
+        perf_hr.acc_multiplier > 1.0,
         "narrower windows should reward the score, got {}",
-        1.0f64 /* window_scalar leftover */
+        perf_hr.acc_multiplier
     );
 }
 
@@ -951,9 +951,9 @@ fn an_implausible_fit_is_still_priced() {
     let perf = calculate_performance(&attrs, &ez_mods, state);
 
     assert!(
-        1.0f64 /* window_scalar leftover */ < 0.95,
+        perf.acc_multiplier < 0.95,
         "an implausible fit must still be priced by its windows, got {}",
-        1.0f64 /* window_scalar leftover */
+        perf.acc_multiplier
     );
 }
 
