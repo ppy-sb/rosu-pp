@@ -865,7 +865,11 @@ fn calculate_from_data(data: RebirthData, classic: bool) -> RebirthParams {
     let effective_weights: Vec<_> = if classic {
         density.iter().zip(gaps).map(|(&c, gap)| c * gap).collect()
     } else {
-        density_v2.iter().zip(gaps).map(|(&c, gap)| c * gap).collect()
+        density_v2
+            .iter()
+            .zip(gaps)
+            .map(|(&c, gap)| c * gap)
+            .collect()
     };
     let mut sorted_indices: Vec<_> = (0..d_all.len()).collect();
     sorted_indices.sort_by(|&a, &b| d_all[a].total_cmp(&d_all[b]));
@@ -933,7 +937,12 @@ fn calculate_from_data(data: RebirthData, classic: bool) -> RebirthParams {
 
 /// Spikiness measure from the weighted variance of the corner difficulty
 /// values, i.e. how much the difficulty spikes within the map.
-fn compute_spikiness(d_sorted: &[f64], w_sorted: &[f64], weighted_mean: f64, total_weight: f64) -> f64 {
+fn compute_spikiness(
+    d_sorted: &[f64],
+    w_sorted: &[f64],
+    weighted_mean: f64,
+    total_weight: f64,
+) -> f64 {
     // Degenerate cases where the reference implementation would produce NaN
     if weighted_mean == 0.0 || total_weight <= 0.0 {
         return 0.0;
@@ -959,7 +968,10 @@ fn compute_switches(data: &RebirthData, ks_arr: &[f64], d_all: &[f64]) -> f64 {
     let heads: Vec<f64> = data.notes.iter().map(|note| note.head).collect();
 
     // For each head, the index of the first corner >= head (last index dropped)
-    let idx_list: Vec<usize> = heads.iter().map(|&head| lower_bound(all_corners, head)).collect();
+    let idx_list: Vec<usize> = heads
+        .iter()
+        .map(|&head| lower_bound(all_corners, head))
+        .collect();
     let n = idx_list.len().saturating_sub(1);
 
     let ks_at_note: Vec<f64> = idx_list[..n].iter().map(|&i| ks_arr[i]).collect();
@@ -1004,12 +1016,20 @@ fn compute_switches(data: &RebirthData, ks_arr: &[f64], d_all: &[f64]) -> f64 {
     let mut num_tail_gaps = 0;
 
     if tails.len() > 1 && tails[tails.len() - 1] > tails[0] {
-        let idx_list_tails: Vec<usize> =
-            tails.iter().map(|&tail| lower_bound(all_corners, tail)).collect();
+        let idx_list_tails: Vec<usize> = tails
+            .iter()
+            .map(|&tail| lower_bound(all_corners, tail))
+            .collect();
         let n_tails = idx_list_tails.len() - 1;
 
-        let ks_at_tail: Vec<f64> = idx_list_tails[..n_tails].iter().map(|&i| ks_arr[i]).collect();
-        let weights_at_tail: Vec<f64> = idx_list_tails[..n_tails].iter().map(|&i| d_all[i]).collect();
+        let ks_at_tail: Vec<f64> = idx_list_tails[..n_tails]
+            .iter()
+            .map(|&i| ks_arr[i])
+            .collect();
+        let weights_at_tail: Vec<f64> = idx_list_tails[..n_tails]
+            .iter()
+            .map(|&i| d_all[i])
+            .collect();
 
         let tail_gaps: Vec<f64> = tails.windows(2).map(|w| w[1] - w[0]).collect();
         let num_tail_gaps_tmp = tail_gaps.len();
@@ -1078,7 +1098,11 @@ fn compute_variety(data: &RebirthData) -> f64 {
     let mut head_gaps_new = Vec::new();
 
     for column in &data.notes_by_column {
-        head_gaps_new.extend(column.windows(2).map(|w| w[1].head as i64 - w[0].head as i64));
+        head_gaps_new.extend(
+            column
+                .windows(2)
+                .map(|w| w[1].head as i64 - w[0].head as i64),
+        );
     }
 
     let col_variety = 2.5 * rao_quadratic_entropy_log(&head_gaps_new, 2);
