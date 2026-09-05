@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use crate::{
     Beatmap, Difficulty, GameMods,
     mania::object::{ManiaObject, ObjectParams},
-    mania::sunny_windows::effective_windows,
+    mania::sunny_windows::{ManiaHitWindows, effective_windows},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -35,7 +35,7 @@ pub(super) struct RebirthParams {
 
 struct RebirthData {
     total_columns: usize,
-    hit_leniency: f64,
+    hit_windows: ManiaHitWindows,
     t_end: f64,
     notes: Vec<Note>,
     notes_by_column: Vec<Vec<Note>>,
@@ -44,6 +44,13 @@ struct RebirthData {
     all_corners: Vec<f64>,
     base_corners: Vec<f64>,
     awkwardness_corners: Vec<f64>,
+}
+
+impl RebirthData {
+    #[inline]
+    fn hit_leniency(&self) -> f64 {
+        hit_leniency_from_window(self.hit_windows.great)
+    }
 }
 
 struct LongNoteBodyRepresentation {
@@ -249,11 +256,9 @@ fn prepare_data(
     let (all_corners, base_corners, awkwardness_corners) = get_corners(t_end, &notes);
 
     let windows = effective_windows(f64::from(od), is_convert, mods, clock_rate, classic);
-    let great_window = windows.great;
-
     Some(RebirthData {
         total_columns,
-        hit_leniency: hit_leniency_from_window(great_window),
+        hit_windows: windows,
         t_end,
         notes,
         notes_by_column,
@@ -521,6 +526,7 @@ fn compute_anchor(key_usage_400: &[Vec<f64>]) -> Vec<f64> {
 }
 
 fn compute_jbar(data: &RebirthData) -> (Vec<Vec<f64>>, Vec<f64>) {
+    let hit_leniency = data.hit_leniency();
     let len = data.base_corners.len();
     let mut j_by_column = vec![vec![0.0; len]; data.total_columns];
     let mut delta_by_column = vec![vec![1e9; len]; data.total_columns];
@@ -537,7 +543,7 @@ fn compute_jbar(data: &RebirthData) -> (Vec<Vec<f64>>, Vec<f64>) {
             }
 
             let delta = 0.001 * (end - start);
-            let val = delta.powi(-1) * (delta + 0.11 * data.hit_leniency.powf(0.25)).powi(-1);
+            let val = delta.powi(-1) * (delta + 0.11 * hit_leniency.powf(0.25)).powi(-1);
             let j_val = val * jack_nerfer(delta);
 
             for idx in left..right {
@@ -594,6 +600,8 @@ fn compute_xbar(data: &RebirthData, active_columns: &[Vec<usize>]) -> Vec<f64> {
     let mut x_by_pair = vec![vec![0.0; len]; data.total_columns + 1];
     let mut fast_cross = vec![vec![0.0; len]; data.total_columns + 1];
 
+    let hit_leniency = data.hit_leniency();
+
     for pair_column in 0..=data.total_columns {
         let notes_in_pair = notes_in_pair(data, pair_column);
 
@@ -608,7 +616,7 @@ fn compute_xbar(data: &RebirthData, active_columns: &[Vec<usize>]) -> Vec<f64> {
             }
 
             let delta = 0.001 * (end - start);
-            let mut val = 0.16 * data.hit_leniency.max(delta).powi(-2);
+            let mut val = 0.16 * hit_leniency.max(delta).powi(-2);
 
             if (!active_columns_contains(active_columns, left, pair_column as isize - 1)
                 && !active_columns_contains(
@@ -626,8 +634,7 @@ fn compute_xbar(data: &RebirthData, active_columns: &[Vec<usize>]) -> Vec<f64> {
                 val *= 1.0 - cross_coeff[pair_column.min(cross_coeff.len() - 1)];
             }
 
-            let fast =
-                (0.4 * delta.max(0.06).max(0.75 * data.hit_leniency).powi(-2) - 80.0).max(0.0);
+            let fast = (0.4 * delta.max(0.06).max(0.75 * hit_leniency).powi(-2) - 80.0).max(0.0);
 
             for idx in left..right {
                 x_by_pair[pair_column][idx] = val;
@@ -662,6 +669,7 @@ fn compute_pbar(
     anchor: &[f64],
 ) -> Vec<f64> {
     let mut p_step = vec![0.0; data.base_corners.len()];
+    let hit_leniency = data.hit_leniency();
 
     for pair in data.notes.windows(2) {
         let h_l = pair[0].head;
@@ -669,7 +677,7 @@ fn compute_pbar(
         let delta_time = h_r - h_l;
 
         if delta_time < 1e-9 {
-            let spike = 1000.0 * (0.02 * (4.0 / data.hit_leniency - 24.0)).powf(0.25);
+            let spike = 1000.0 * (0.02 * (4.0 / hit_leniency - 24.0)).powf(0.25);
             let left = lower_bound(&data.base_corners, h_l);
             let right = upper_bound(&data.base_corners, h_l);
 
@@ -690,21 +698,17 @@ fn compute_pbar(
         let delta = 0.001 * delta_time;
         let v = 1.0 + 6.0 * 0.001 * ln_rep.sum(h_l, h_r);
         let booster = stream_booster(delta);
-        let base = 0.08 * data.hit_leniency.powi(-1);
-        let inc = if delta < 2.0 * data.hit_leniency / 3.0 {
+        let base = 0.08 * hit_leniency.powi(-1);
+        let inc = if delta < 2.0 * hit_leniency / 3.0 {
             delta.powi(-1)
                 * (base
-                    * (1.0
-                        - 24.0
-                            * data.hit_leniency.powi(-1)
-                            * (delta - data.hit_leniency / 2.0).powi(2)))
+                    * (1.0 - 24.0 * hit_leniency.powi(-1) * (delta - hit_leniency / 2.0).powi(2)))
                 .powf(0.25)
                 * booster.max(v)
         } else {
             delta.powi(-1)
-                * (base
-                    * (1.0 - 24.0 * data.hit_leniency.powi(-1) * (data.hit_leniency / 6.0).powi(2)))
-                .powf(0.25)
+                * (base * (1.0 - 24.0 * hit_leniency.powi(-1) * (hit_leniency / 6.0).powi(2)))
+                    .powf(0.25)
                 * booster.max(v)
         };
 
@@ -764,6 +768,7 @@ fn compute_abar(
 }
 
 fn compute_rbar(data: &RebirthData) -> Vec<f64> {
+    let hit_leniency = data.hit_leniency();
     let mut r_step = vec![0.0; data.base_corners.len()];
 
     if data.tails.len() < 2 {
@@ -777,8 +782,8 @@ fn compute_rbar(data: &RebirthData) -> Vec<f64> {
             let next_head = find_next_note_in_column(*tail, &data.notes_by_column[tail.column])
                 .map_or(1e9, |note| note.head);
             let tail_time = tail.tail_or_head();
-            let i_h = 0.001 * (tail_time - tail.head - 80.0).abs() / data.hit_leniency;
-            let i_t = 0.001 * (next_head - tail_time - 80.0).abs() / data.hit_leniency;
+            let i_h = 0.001 * (tail_time - tail.head - 80.0).abs() / hit_leniency;
+            let i_t = 0.001 * (next_head - tail_time - 80.0).abs() / hit_leniency;
 
             2.0 / (2.0 + (-5.0 * (i_h - 0.75)).exp() + (-5.0 * (i_t - 0.75)).exp())
         })
@@ -797,7 +802,7 @@ fn compute_rbar(data: &RebirthData) -> Vec<f64> {
         let delta_r = 0.001 * (t_end - t_start);
         let value = 0.08
             * delta_r.powf(-0.5)
-            * data.hit_leniency.powi(-1)
+            * hit_leniency.powi(-1)
             * (1.0 + 0.8 * (i_list[idx] + i_list[idx + 1]));
 
         for step in &mut r_step[left..right] {
