@@ -738,7 +738,6 @@ pub fn calculate(
     let classic = is_classic(lazer, mods);
 
     let great_hit_window = get_hit_window_300(map, clock_rate, classic, mods);
-    let hit_leniency = hit_leniency_from_window(great_hit_window);
     let windows = hit_windows(map, mods, clock_rate, classic);
 
     // The same map judged without the window-affecting mods. Mods reach `hit_windows`
@@ -757,7 +756,7 @@ pub fn calculate(
         return None;
     }
 
-    let data = RebirthData::new(notes, total_columns, hit_leniency, windows.good);
+    let data = RebirthData::new_with_windows(notes, total_columns, windows);
     let params = calculate_from_data(&data, classic)?;
 
     let mut attrs = SunnyManiaDifficultyAttributes {
@@ -1618,11 +1617,10 @@ fn column_for(object: &HitObject, total_columns: usize) -> usize {
 
 struct RebirthData {
     total_columns: usize,
-    hit_leniency: f64,
+    hit_windows: ManiaHitWindows,
     /// The GOOD hit window (ms) a release is judged against. Mod-aware: it is the
     /// *played* windows (`windows`, not `map_windows`), so a tighter HR window really
     /// does mean less collision. Used by [`compute_rbar`]'s collision term.
-    good_window: f64,
     t_end: f64,
     notes: Vec<Note>,
     notes_by_column: Vec<Vec<Note>>,
@@ -1639,6 +1637,17 @@ impl RebirthData {
         total_columns: usize,
         hit_leniency: f64,
         good_window: f64,
+    ) -> Self {
+        let mut hit_windows = ManiaHitWindows::default();
+        hit_windows.great = hit_leniency;
+        hit_windows.good = good_window;
+        Self::new_with_windows(notes, total_columns, hit_windows)
+    }
+
+    fn new_with_windows(
+        mut notes: Vec<Note>,
+        total_columns: usize,
+        hit_windows: ManiaHitWindows,
     ) -> Self {
         notes.sort_by(compare_notes);
 
@@ -1667,8 +1676,7 @@ impl RebirthData {
 
         Self {
             total_columns,
-            hit_leniency,
-            good_window,
+            hit_windows,
             t_end,
             notes,
             notes_by_column,
@@ -1678,6 +1686,11 @@ impl RebirthData {
             base_corners,
             awkwardness_corners,
         }
+    }
+
+    #[inline]
+    fn hit_leniency(&self) -> f64 {
+        hit_leniency_from_window(self.hit_windows.great)
     }
 }
 
@@ -1941,6 +1954,7 @@ fn jack_nerfer(delta: f64) -> f64 {
 }
 
 fn compute_jbar(data: &RebirthData) -> (Vec<Vec<f64>>, Vec<f64>) {
+    let hit_leniency = data.hit_leniency();
     let len = data.base_corners.len();
     let mut j_by_column = vec![vec![0.0; len]; data.total_columns];
     let mut delta_by_column = vec![vec![1e9; len]; data.total_columns];
@@ -1957,7 +1971,7 @@ fn compute_jbar(data: &RebirthData) -> (Vec<Vec<f64>>, Vec<f64>) {
             }
 
             let delta = 0.001 * (end - start);
-            let val = delta.powi(-1) * (delta + 0.11 * data.hit_leniency.powf(0.25)).powi(-1);
+            let val = delta.powi(-1) * (delta + 0.11 * hit_leniency.powf(0.25)).powi(-1);
             let j_val = val * jack_nerfer(delta);
 
             for idx in left..right {
@@ -1994,6 +2008,7 @@ fn compute_jbar(data: &RebirthData) -> (Vec<Vec<f64>>, Vec<f64>) {
 // ---------------------------------------------------------------------------
 
 fn compute_xbar(data: &RebirthData, active_columns: &[Vec<usize>]) -> Vec<f64> {
+    let hit_leniency = data.hit_leniency();
     const CROSS_MATRIX: [&[f64]; 11] = [
         &[-1.0],
         &[0.075, 0.075],
@@ -2032,7 +2047,7 @@ fn compute_xbar(data: &RebirthData, active_columns: &[Vec<usize>]) -> Vec<f64> {
             }
 
             let delta = 0.001 * (end - start);
-            let mut val = 0.16 * data.hit_leniency.max(delta).powi(-2);
+            let mut val = 0.16 * hit_leniency.max(delta).powi(-2);
 
             if (!active_columns_contains(active_columns, left, pair_column as isize - 1)
                 && !active_columns_contains(
@@ -2051,7 +2066,7 @@ fn compute_xbar(data: &RebirthData, active_columns: &[Vec<usize>]) -> Vec<f64> {
             }
 
             let fast =
-                (0.4 * delta.max(0.06).max(0.75 * data.hit_leniency).powi(-2) - 80.0).max(0.0);
+                (0.4 * delta.max(0.06).max(0.75 * hit_leniency).powi(-2) - 80.0).max(0.0);
 
             for idx in left..right {
                 x_by_pair[pair_column][idx] = val;
@@ -2205,6 +2220,7 @@ fn compute_pbar(
     ln_rep: &LongNoteBodyRepresentation,
     anchor: &[f64],
 ) -> Vec<f64> {
+    let hit_leniency = data.hit_leniency();
     let mut p_step = vec![0.0; data.base_corners.len()];
 
     for pair in data.notes.windows(2) {
@@ -2213,7 +2229,7 @@ fn compute_pbar(
         let delta_time = h_r - h_l;
 
         if delta_time < 1e-9 {
-            let spike = 1000.0 * (0.02 * (4.0 / data.hit_leniency - 24.0)).powf(0.25);
+            let spike = 1000.0 * (0.02 * (4.0 / hit_leniency - 24.0)).powf(0.25);
             let left = lower_bound(&data.base_corners, h_l);
             let right = upper_bound(&data.base_corners, h_l);
 
@@ -2234,20 +2250,20 @@ fn compute_pbar(
         let delta = 0.001 * delta_time;
         let v = 1.0 + 6.0 * 0.001 * ln_rep.sum(h_l, h_r);
         let booster = stream_booster(delta);
-        let base = 0.08 * data.hit_leniency.powi(-1);
-        let inc = if delta < 2.0 * data.hit_leniency / 3.0 {
+        let base = 0.08 * hit_leniency.powi(-1);
+        let inc = if delta < 2.0 * hit_leniency / 3.0 {
             delta.powi(-1)
                 * (base
                     * (1.0
                         - 24.0
-                            * data.hit_leniency.powi(-1)
-                            * (delta - data.hit_leniency / 2.0).powi(2)))
+                            * hit_leniency.powi(-1)
+                            * (delta - hit_leniency / 2.0).powi(2)))
                 .powf(0.25)
                 * booster.max(v)
         } else {
             delta.powi(-1)
                 * (base
-                    * (1.0 - 24.0 * data.hit_leniency.powi(-1) * (data.hit_leniency / 6.0).powi(2)))
+                    * (1.0 - 24.0 * hit_leniency.powi(-1) * (hit_leniency / 6.0).powi(2)))
                 .powf(0.25)
                 * booster.max(v)
         };
@@ -2337,6 +2353,7 @@ fn find_next_note_in_column(note: Note, notes: &[Note]) -> Option<Note> {
 }
 
 fn compute_rbar(data: &RebirthData) -> Vec<f64> {
+    let hit_leniency = data.hit_leniency();
     let mut r_step = vec![0.0; data.base_corners.len()];
 
     if data.tails.len() < 2 {
@@ -2350,8 +2367,8 @@ fn compute_rbar(data: &RebirthData) -> Vec<f64> {
             let next_head = find_next_note_in_column(*tail, &data.notes_by_column[tail.column])
                 .map_or(1e9, |note| note.head);
             let tail_time = tail.tail_or_head();
-            let i_h = 0.001 * (tail_time - tail.head - 80.0).abs() / data.hit_leniency;
-            let i_t = 0.001 * (next_head - tail_time - 80.0).abs() / data.hit_leniency;
+            let i_h = 0.001 * (tail_time - tail.head - 80.0).abs() / hit_leniency;
+            let i_t = 0.001 * (next_head - tail_time - 80.0).abs() / hit_leniency;
 
             let i = 2.0 / (2.0 + (-5.0 * (i_h - 0.75)).exp() + (-5.0 * (i_t - 0.75)).exp());
 
@@ -2361,8 +2378,8 @@ fn compute_rbar(data: &RebirthData) -> Vec<f64> {
             // (release after the next head) clamps to 1.0 — total collision, which is
             // the right answer.
             let g = next_head - tail_time;
-            let c = if data.good_window > 0.0 {
-                (1.0 - g / data.good_window).clamp(0.0, 1.0)
+            let c = if data.hit_windows.good > 0.0 {
+                (1.0 - g / data.hit_windows.good).clamp(0.0, 1.0)
             } else {
                 0.0
             };
@@ -2391,7 +2408,7 @@ fn compute_rbar(data: &RebirthData) -> Vec<f64> {
         // `1 + 2*COLLISION_WEIGHT`.
         let value = 0.08
             * delta_r.powf(-0.5)
-            * data.hit_leniency.powi(-1)
+            * hit_leniency.powi(-1)
             * (1.0 + 0.8 * (i_list[idx] + i_list[idx + 1]))
             * (1.0 + COLLISION_WEIGHT * 0.5 * (c_list[idx] + c_list[idx + 1]));
 
