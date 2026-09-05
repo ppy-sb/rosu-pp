@@ -6,3 +6,5 @@ output*
 expanded.rs
 .sem/
 sem_diff*
+local-fixtures
+tools/__pycache__

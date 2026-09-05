@@ -4,8 +4,9 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use crate::{
-    Beatmap, Difficulty,
+    Beatmap, Difficulty, GameMods,
     mania::object::{ManiaObject, ObjectParams},
+    mania::sunny_windows::effective_windows,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -137,6 +138,7 @@ pub(super) fn calculate_params(difficulty: &Difficulty, map: &Beatmap) -> Rebirt
     let total_columns = map.cs.round_ties_even().max(1.0) as usize;
     let clock_rate = difficulty.get_clock_rate();
     let take = difficulty.get_passed_objects();
+    let classic = is_classic(difficulty);
     let mut params = ObjectParams::new(map);
     let objects = map
         .hit_objects
@@ -144,27 +146,56 @@ pub(super) fn calculate_params(difficulty: &Difficulty, map: &Beatmap) -> Rebirt
         .map(|h| ManiaObject::new(h, total_columns as f32, &mut params))
         .take(take);
 
-    calculate_params_for_objects(total_columns, map.od, clock_rate, is_classic(difficulty), objects)
+    calculate_params_for_objects(
+        total_columns,
+        map.od,
+        map.is_convert,
+        clock_rate,
+        classic,
+        difficulty.get_mods(),
+        objects,
+    )
 }
 
 pub(super) fn calculate_stars_for_objects(
     total_columns: usize,
     od: f32,
+    is_convert: bool,
     clock_rate: f64,
     classic: bool,
+    mods: &GameMods,
     objects: impl IntoIterator<Item = ManiaObject>,
 ) -> f64 {
-    calculate_params_for_objects(total_columns, od, clock_rate, classic, objects).sr
+    calculate_params_for_objects(
+        total_columns,
+        od,
+        is_convert,
+        clock_rate,
+        classic,
+        mods,
+        objects,
+    )
+    .sr
 }
 
 pub(super) fn calculate_params_for_objects(
     total_columns: usize,
     od: f32,
+    is_convert: bool,
     clock_rate: f64,
     classic: bool,
+    mods: &GameMods,
     objects: impl IntoIterator<Item = ManiaObject>,
 ) -> RebirthParams {
-    let Some(data) = prepare_data(total_columns, od, clock_rate, objects) else {
+    let Some(data) = prepare_data(
+        total_columns,
+        od,
+        is_convert,
+        clock_rate,
+        classic,
+        mods,
+        objects,
+    ) else {
         return RebirthParams::default();
     };
 
@@ -181,7 +212,10 @@ fn is_classic(difficulty: &Difficulty) -> bool {
 fn prepare_data(
     total_columns: usize,
     od: f32,
+    is_convert: bool,
     clock_rate: f64,
+    classic: bool,
+    mods: &GameMods,
     objects: impl IntoIterator<Item = ManiaObject>,
 ) -> Option<RebirthData> {
     let mut notes = build_notes(clock_rate, objects);
@@ -214,9 +248,12 @@ fn prepare_data(
         + 1.0;
     let (all_corners, base_corners, awkwardness_corners) = get_corners(t_end, &notes);
 
+    let windows = effective_windows(f64::from(od), is_convert, mods, clock_rate, classic);
+    let great_window = windows.great;
+
     Some(RebirthData {
         total_columns,
-        hit_leniency: hit_leniency(f64::from(od)),
+        hit_leniency: hit_leniency_from_window(great_window),
         t_end,
         notes,
         notes_by_column,
@@ -251,8 +288,10 @@ fn compare_notes(a: &Note, b: &Note) -> Ordering {
         .then_with(|| a.column.cmp(&b.column))
 }
 
-fn hit_leniency(od: f64) -> f64 {
-    let x = 0.3 * ((64.5 - (od * 3.0).ceil()) / 500.0).sqrt();
+/// Convert a GREAT hit window to hit leniency.
+/// This is the same formula used in sunny.rs.
+fn hit_leniency_from_window(great_window: f64) -> f64 {
+    let x = 0.3 * (great_window / 500.0).sqrt();
     x.min(0.6 * (x - 0.09) + 0.09)
 }
 
@@ -1220,7 +1259,12 @@ mod tests {
 
     #[test]
     fn hit_leniency_matches_reference_formula() {
-        assert!((hit_leniency(8.0) - 0.08538149682454625).abs() < 1e-12);
+        // OD 8, classic non-convert, no mods, clock_rate 1.0
+        // Expected GREAT window: 34 + 3 * (10 - 8) = 40, after quantization: 40.5
+        let expected_great_window = 40.5;
+        assert!(
+            (hit_leniency_from_window(expected_great_window) - 0.08538149682454625).abs() < 1e-12
+        );
     }
 
     #[test]

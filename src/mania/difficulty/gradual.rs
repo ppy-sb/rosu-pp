@@ -170,8 +170,10 @@ impl Iterator for ManiaGradualDifficulty {
         let params = super::rebirth::calculate_params_for_objects(
             self.total_columns,
             self.od,
+            self.is_convert,
             self.clock_rate,
             classic,
+            self.difficulty.get_mods(),
             self.mania_objects.iter().take(self.idx).copied(),
         );
 
