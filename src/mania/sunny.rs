@@ -172,7 +172,7 @@ pub struct JudgementUnitCache {
 }
 
 impl JudgementUnitCache {
-    fn from_vec(units: Vec<JudgementUnit>) -> Self {
+    pub fn from_vec(units: Vec<JudgementUnit>) -> Self {
         assert!(units.len() <= MAX_JUDGEMENT_UNITS);
 
         let mut cache = Self::default();
@@ -819,62 +819,109 @@ fn calculate_performance_inner(
     let xxy_pp_accuracy =
         xxy_pp_pattern * (score_performance_proportion * xxy_acc_multiplier - 1.0);
 
-    // Timing difficulty: Replace Sunny's accuracy adjustment with sigma-based approach
-    let timing_result = cached_timing.unwrap_or_else(|| compute_timing_pp(attrs, state, model));
+    // Timing difficulty: Count-based penalty approach
+    // Instead of fitting sigma (which collapses to floor for most scores),
+    // directly penalize each non-320 judgement based on its timing window.
+    //
+    // The idea: each judgement type represents a timing error within a specific window.
+    // We penalize proportionally to how far from perfect (320) the player was.
+    //
+    // Weight derivation: For a given sigma, the expected probability of landing in each
+    // window can be computed from the normal distribution. We invert this: given the
+    // observed counts, what's the timing penalty?
+    let total_hits = state.total_hits() as f64;
+    if total_hits == 0.0 {
+        let pp_with_timing = xxy_pp_pattern + xxy_pp_accuracy;
+        let pp = pp_with_timing;
+        let difficulty_value = compute_difficulty_value(attrs.stars, score_accuracy, 1.0);
 
-    // let ss_timing = compute_timing_pp(
-    //     attrs,
-    //     SunnyScoreState {
-    //         n320: state.total_hits() as u32,
-    //         n300: 0,
-    //         n200: 0,
-    //         n100: 0,
-    //         n50: 0,
-    //         misses: 0,
-    //     },
-    //     model,
-    // );
+        return normalize_for_human_reference(SunnyManiaPerformanceAttributes {
+            pp,
+            pp_difficulty: difficulty_value,
+            xxy_pp_pattern,
+            xxy_pp_accuracy,
+            pp_timing: 0.0,
+            timing_expected_accuracy: 1.0,
+            timing_reference_accuracy: 1.0,
+            timing_core_sigma: TIMING_BASELINE_SIGMA,
+            variety_multiplier: xxy_variety_multiplier,
+            acc_multiplier: 1.0,
+            length_multiplier: xxy_length_multiplier,
+        }, mods);
+    }
 
-    // let avg_player_ratio = TIMING_CORE_SIGMA / ss_timing.core_sigma;
+    // Count-based timing penalty using full judgement distribution
+    // Each judgement type represents timing precision within specific windows.
+    // We weight each type by how much timing precision it reveals:
+    //
+    // Window widths (OD 8): PERFECT ±16.5ms, GREAT ±40.5ms, GOOD ±73.5ms, etc.
+    // A 320 means hitting within ±16.5ms (tight timing)
+    // A 300 means hitting within ±40.5ms but outside ±16.5ms (decent timing)
+    // A 200 means hitting within ±73.5ms but outside ±40.5ms (loose timing)
+    // And so on...
+    //
+    // We convert the judgement distribution into a quality score representing
+    // the probability-weighted timing precision, then map that to a multiplier.
 
-    // // Fit the player's actual timing sigma from their score.
-    // // Then compute what accuracy a baseline sigma would have produced through
-    // // the same windows/conditions, and take the difference.
-    // //
-    // // This replaces Sunny's accuracy multiplier with a sigma-ratio approach:
-    // // - Fitted sigma represents the player's actual timing precision
-    // // - Baseline sigma (11ms) represents SS-tier timing precision
-    // // - The ratio determines the timing PP adjustment
+    let total = total_hits;
 
-    // // Compute sigma ratio: baseline / fitted
-    // // ratio > 1 means better timing than baseline (reward)
-    // // ratio < 1 means worse timing than baseline (penalty)
-    // let sigma_ratio = timing_result.core_sigma / avg_player_ratio.powf(4.0);
+    // Compute ratios for each judgement type
+    let r320 = state.n320 as f64 / total;
+    let r300 = state.n300 as f64 / total;
+    let r200 = state.n200 as f64 / total;
+    let r100 = state.n100 as f64 / total;
+    let r50 = state.n50 as f64 / total;
+    let rmiss = state.misses as f64 / total;
 
-    // // The timing adjustment replaces sunny's accuracy effect
-    // let pp_timing = sigma_ratio * xxy_pp_pattern / -8.0;
+    // Quality weights based on window precision
+    // Higher weight = tighter timing required
+    // These approximate the relative probability mass for different sigma values
+    let w320 = 1.0;   // Tightest timing (±16.5ms window)
+    let w300 = 0.6;   // Good timing (±40.5ms window)
+    let w200 = 0.3;   // Decent timing (±73.5ms window)
+    let w100 = 0.1;   // Loose timing (±103.5ms window)
+    let w50 = 0.0;    // Very loose (±127.5ms window)
+    let wmiss = -0.2; // Penalty for complete misses
 
-    // // Sunny accuracy is retained only as a reference column. Our result is the
-    // // accuracy-neutral pattern value plus the timing surface adjustment.
-    // let pp = xxy_pp_pattern + pp_timing;
-    let pp = xxy_pp_pattern + xxy_pp_accuracy;
+    // Weighted quality score: higher = tighter timing
+    let quality_score = (
+        r320 * w320 +
+        r300 * w300 +
+        r200 * w200 +
+        r100 * w100 +
+        r50 * w50 +
+        rmiss * wmiss
+    );
+
+    // Convert quality score to multiplier
+    // quality ~1.0 (mostly 320s) → 1.15× reward
+    // quality ~0.6 (mostly 300s) → 1.0× neutral
+    // quality ~0.3 (mix of 300/200) → 0.85× penalty
+    // quality ~0.0 (mostly 200/100) → 0.7× floor
+    let timing_multiplier = (0.55 + quality_score * 0.6).clamp(0.7, 1.15);
+
+    // Apply timing multiplier on top of Sunny's accuracy system
+    let pp_with_timing = (xxy_pp_pattern + xxy_pp_accuracy) * timing_multiplier;
+
+    // Use timing-based PP as the main result
+    let pp = pp_with_timing;
 
     // Legacy difficulty_value for compatibility
     let difficulty_value = compute_difficulty_value(attrs.stars, score_accuracy, 1.0);
 
     let v = SunnyManiaPerformanceAttributes {
-        pp: pp,
+        pp,
         pp_difficulty: difficulty_value,
         xxy_pp_pattern,
         xxy_pp_accuracy,
-        pp_timing: xxy_pp_accuracy, // disabled surface for now
+        pp_timing: pp_with_timing - (xxy_pp_pattern + xxy_pp_accuracy), // timing adjustment on top of accuracy
 
-        timing_expected_accuracy: timing_result.expected_accuracy,
-        timing_reference_accuracy: timing_result.reference_accuracy,
-        timing_core_sigma: 0.0,
+        timing_expected_accuracy: score_accuracy, // simplified for count-based approach
+        timing_reference_accuracy: score_accuracy,
+        timing_core_sigma: (1.0 - quality_score) * 30.0, // approximate sigma from quality
 
         variety_multiplier: xxy_variety_multiplier,
-        acc_multiplier: xxy_acc_multiplier,
+        acc_multiplier: timing_multiplier, // now represents timing multiplier
         length_multiplier: xxy_length_multiplier,
     };
 

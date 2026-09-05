@@ -177,6 +177,17 @@ impl Iterator for ManiaGradualDifficulty {
             self.mania_objects.iter().take(self.idx).copied(),
         );
 
+        // Create basic judgement units for timing sigma fitting
+        let judgement_units = if self.idx > 0 {
+            let units = vec![crate::mania::sunny_accuracy::JudgementUnit::repeated(
+                params.sr,
+                self.idx as f64,
+            )];
+            Some(crate::mania::sunny::JudgementUnitCache::from_vec(units))
+        } else {
+            None
+        };
+
         Some(ManiaDifficultyAttributes {
             stars: params.sr,
             max_combo: self.note_state.curr_combo,
@@ -185,6 +196,9 @@ impl Iterator for ManiaGradualDifficulty {
             is_convert: self.is_convert,
             variety: params.variety,
             acc_scalar: 0.5 * params.spikiness + 0.5 * params.switches,
+            od: self.od,
+            classic,
+            judgement_units,
         })
     }
 

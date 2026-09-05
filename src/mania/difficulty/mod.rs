@@ -17,7 +17,11 @@ use crate::{
     util::sync::RefCount,
 };
 
-use super::attributes::ManiaDifficultyAttributes;
+use super::{
+    attributes::ManiaDifficultyAttributes,
+    sunny::{JudgementUnitCache},
+    sunny_accuracy::{JudgementUnit},
+};
 
 mod evaluators;
 pub mod gradual;
@@ -52,6 +56,17 @@ fn calculate_difficulty(difficulty: &Difficulty, map: &Beatmap) -> ManiaDifficul
 
     let values = DifficultyValues::calculate(difficulty, map);
     let params = rebirth::calculate_params(difficulty, map);
+    let classic = rebirth::is_classic(difficulty);
+
+    // Create basic judgement units for timing sigma fitting
+    // For now, use a uniform difficulty unit. This can be enhanced later with
+    // per-note difficulty bins from the rebirth calculation.
+    let judgement_units = if n_objects > 0 {
+        let units = vec![JudgementUnit::repeated(params.sr, f64::from(n_objects))];
+        Some(JudgementUnitCache::from_vec(units))
+    } else {
+        None
+    };
 
     ManiaDifficultyAttributes {
         stars: params.sr,
@@ -61,6 +76,9 @@ fn calculate_difficulty(difficulty: &Difficulty, map: &Beatmap) -> ManiaDifficul
         is_convert: map.is_convert,
         variety: params.variety,
         acc_scalar: 0.5 * params.spikiness + 0.5 * params.switches,
+        od: map.od,
+        classic,
+        judgement_units,
     }
 }
 

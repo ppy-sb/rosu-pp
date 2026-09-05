@@ -146,6 +146,9 @@ macro_rules! test_cases {
             is_convert: $is_convert,
             variety: 0.0,
             acc_scalar: 0.0,
+            od: 0.0,
+            classic: false,
+            judgement_units: None,
         }
     }
 }

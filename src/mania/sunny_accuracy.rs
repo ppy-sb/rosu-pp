@@ -282,7 +282,7 @@ pub(crate) const TIMING_CORE_SIGMA: f64 = 8.5;
 /// (higher fitted sigma) receive penalties.
 ///
 /// Value derived from observed fitted sigma of high-accuracy scores (~10-11ms).
-pub(crate) const TIMING_BASELINE_SIGMA: f64 = 11.0;
+pub const TIMING_BASELINE_SIGMA: f64 = 11.0;
 
 /// Replay-calibrated timing-distribution shape and structural offsets.
 #[derive(Copy, Clone, Debug, PartialEq)]

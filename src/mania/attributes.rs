@@ -1,4 +1,4 @@
-use crate::mania::performance::ManiaPerformance;
+use crate::mania::{performance::ManiaPerformance, sunny::JudgementUnitCache};
 
 /// The result of a difficulty calculation on an osu!mania map.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -19,6 +19,16 @@ pub struct ManiaDifficultyAttributes {
     pub variety: f64,
     /// The accuracy scalar of the map, used for performance calculation.
     pub acc_scalar: f64,
+    /// The overall difficulty of the map.
+    pub od: f32,
+    /// Whether classic (osu!stable) scoring is used.
+    pub classic: bool,
+    /// Judgement units for timing-based PP calculations.
+    ///
+    /// Contains per-note difficulty and structural timing information needed
+    /// to fit timing sigma from score judgement counts. May be `None` for
+    /// legacy round-trips or when judgement units were not calculated.
+    pub judgement_units: Option<JudgementUnitCache>,
 }
 
 impl ManiaDifficultyAttributes {

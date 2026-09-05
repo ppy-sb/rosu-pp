@@ -200,7 +200,7 @@ pub(super) fn calculate_params_for_objects(
 /// Whether the score is a classic (osu!stable default / lazer with CL mod)
 /// style play, i.e. long notes give a single judgement and the difficulty
 /// weights use the head-only density.
-fn is_classic(difficulty: &Difficulty) -> bool {
+pub fn is_classic(difficulty: &Difficulty) -> bool {
     (!difficulty.get_lazer() && !difficulty.get_mods().sv2()) || difficulty.get_mods().cl()
 }
 
