@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 mod recovery;
 mod replay;
+mod sigma_gap;
+mod sigma_gap_fit;
 
 fn create_table() -> Table {
     let mut table = Table::new();
@@ -24,6 +26,120 @@ fn create_table() -> Table {
 #[ignore = "requires local replay fixtures"]
 fn replay_report() {
     replay::report_from_env().expect("replay report failed");
+}
+
+/// Measure how timing spread (sigma) varies with gap time between notes.
+///
+/// Run with:
+/// `SUNNY_REPLAY_BATCH=local-fixtures/ladder.tsv cargo test --release sigma_gap_measurement -- --ignored --nocapture`
+#[test]
+#[ignore = "requires local replay fixtures"]
+fn sigma_gap_measurement() {
+    use sigma_gap::{
+        GAP_BIN_EDGES, GAP_BIN_REPRESENTATIVES, SigmaBin, bin_errors_by_gap,
+        extract_errors_with_gaps,
+    };
+    use std::collections::HashMap;
+
+    let batch = std::env::var_os("SUNNY_REPLAY_BATCH")
+        .map(std::path::PathBuf::from)
+        .expect("set SUNNY_REPLAY_BATCH to a TSV with id and mapid columns");
+
+    let text = std::fs::read_to_string(&batch).expect("failed to read replay batch file");
+
+    let mut lines = text.lines();
+    let header: Vec<_> = lines.next().expect("batch is empty").split('\t').collect();
+    let id_col = header
+        .iter()
+        .position(|f| *f == "id")
+        .expect("no id column");
+    let mapid_col = header
+        .iter()
+        .position(|f| *f == "mapid")
+        .expect("no mapid column");
+
+    let parent = batch.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let root = if parent.file_name().is_some_and(|name| name == "cohorts") {
+        parent.parent().unwrap_or(parent)
+    } else {
+        parent
+    };
+
+    // Aggregate across all replays
+    let mut global_bins: HashMap<usize, SigmaBin> = HashMap::new();
+    let mut analyzed = 0;
+    let mut skipped = 0;
+
+    for line in lines {
+        let fields: Vec<_> = line.split('\t').collect();
+        let Some(score_id) = fields.get(id_col) else {
+            continue;
+        };
+        let Some(map_id) = fields.get(mapid_col) else {
+            continue;
+        };
+
+        let osr = root.join("replays").join(format!("{score_id}.osr"));
+        let osu = root.join("maps").join(format!("{map_id}.osu"));
+
+        if !osr.exists() || !osu.exists() {
+            continue;
+        }
+
+        match replay::analyse(&osr, &osu) {
+            Ok(analysis) => {
+                let errors_with_gaps = extract_errors_with_gaps(&analysis);
+                let bins = bin_errors_by_gap(&errors_with_gaps);
+
+                for (bin_idx, bin) in bins {
+                    let global_bin = global_bins.entry(bin_idx).or_default();
+                    global_bin.sum += bin.sum;
+                    global_bin.sum_sq += bin.sum_sq;
+                    global_bin.count += bin.count;
+                }
+
+                analyzed += 1;
+            }
+            Err(err) => {
+                eprintln!("skip {score_id}: {err}");
+                skipped += 1;
+            }
+        }
+    }
+
+    println!("\n=== Sigma vs Gap Measurement ===");
+    println!("Analyzed {} replays, skipped {}", analyzed, skipped);
+    println!();
+    println!(
+        "{:>10} {:>10} {:>10} {:>10}",
+        "gap_ms", "count", "mean_ms", "sigma_ms"
+    );
+    println!("{:-<10} {:-<10} {:-<10} {:-<10}", "", "", "", "");
+
+    // Print results for each bin
+    for bin_idx in 0..=GAP_BIN_EDGES.len() {
+        if let Some(bin) = global_bins.get(&bin_idx) {
+            let gap_rep = if bin_idx < GAP_BIN_REPRESENTATIVES.len() {
+                GAP_BIN_REPRESENTATIVES[bin_idx]
+            } else {
+                f64::INFINITY
+            };
+
+            let gap_label = if gap_rep.is_infinite() {
+                "no_pred".to_string()
+            } else {
+                format!("{:.0}", gap_rep)
+            };
+
+            println!(
+                "{:>10} {:>10} {:>10.2} {:>10.2}",
+                gap_label,
+                bin.count,
+                bin.mean(),
+                bin.sigma()
+            );
+        }
+    }
 }
 
 const MAP_1638954: &str =
@@ -4163,7 +4279,7 @@ fn multiuser_report() {
             "od",
             "rice",
             "ln",
-            "judgement pt",
+            "ttj",
             "320",
             "300",
             "200",
@@ -4171,6 +4287,7 @@ fn multiuser_report() {
             "50",
             "miss",
             "acc%",
+            "expected%",
             "live",
             "rebirth",
             "current",
@@ -4178,6 +4295,7 @@ fn multiuser_report() {
             "cur/rebirth%",
             "map_f",
             "score_a",
+            "score_u",
             "loss_d",
         ]);
 
@@ -4196,7 +4314,7 @@ fn multiuser_report() {
 
             let rice = r.attrs.n_objects - r.attrs.n_long_notes;
             let judgement_points = if r.attrs.ln_judged_as_one {
-                rice
+                rice + r.attrs.n_long_notes
             } else {
                 rice + r.attrs.n_long_notes * 2
             };
@@ -4216,6 +4334,7 @@ fn multiuser_report() {
                 Cell::new(r.row.counts[4]).set_alignment(CellAlignment::Right),
                 Cell::new(r.row.counts[5]).set_alignment(CellAlignment::Right),
                 Cell::new(format!("{:.3}", r.row.acc)),
+                Cell::new(format!("{:.3}", r.attrs.timing_expected_accuracy * 100.0)),
                 Cell::new(format!("{:.1}", r.row.live_pp)).set_alignment(CellAlignment::Right),
                 Cell::new(format!("{:.1}", sunny_local_pp)).set_alignment(CellAlignment::Right),
                 Cell::new(format!("{:.1}", r.perf.pp)).set_alignment(CellAlignment::Right),

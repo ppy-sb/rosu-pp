@@ -267,6 +267,12 @@ const MEASURED_RECOVERY_OFFSET: f64 = 20.425;
 const MEASURED_RECOVERY_TAU: f64 = 116.68;
 const MEASURED_ANTICIPATION_OFFSET: f64 = -2.517;
 
+// Sigma scaling curve parameters (Gaussian fit to replay measurements)
+const MEASURED_SIGMA_BASELINE: f64 = 15.59;
+const MEASURED_SIGMA_PEAK_AMPLITUDE: f64 = 9.55;
+const MEASURED_SIGMA_PEAK_GAP: f64 = 113.86;
+const MEASURED_SIGMA_WIDTH: f64 = 46.44;
+
 /// Replay-measured irreducible core timing spread, in milliseconds.
 ///
 /// Centered hit-time residuals measured 8.52 ms. Score composition can support a
@@ -563,6 +569,30 @@ pub struct ErrorModel {
     /// out to 850 ms across 240k notes. Applies to every press with a predecessor, so on
     /// a sparse map it is the only part of this mechanism that acts.
     pub anticipation_offset: f64,
+
+    /// Sigma scaling: baseline timing spread at sparse gaps (ms).
+    ///
+    /// Measured at 15.59 ms from replay data. Represents timing precision when
+    /// the player has ample time to prepare for each note.
+    pub sigma_baseline: f64,
+
+    /// Sigma scaling: peak additional spread above baseline at moderate density (ms).
+    ///
+    /// Measured at 9.55 ms. At peak density (~114ms gaps), total sigma reaches
+    /// baseline + peak_amplitude ≈ 25ms.
+    pub sigma_peak_amplitude: f64,
+
+    /// Sigma scaling: gap time where timing spread peaks (ms).
+    ///
+    /// Measured at 113.86 ms. This is where players struggle most - dense enough
+    /// to cause interference, but not so dense that it's pure muscle memory.
+    pub sigma_peak_gap: f64,
+
+    /// Sigma scaling: width parameter controlling decay rate (ms).
+    ///
+    /// Measured at 46.44 ms. Controls how quickly sigma returns to baseline
+    /// as gaps move away from the peak.
+    pub sigma_width: f64,
 }
 
 impl Default for ErrorModel {
@@ -588,6 +618,10 @@ impl Default for ErrorModel {
             recovery_offset: MEASURED_RECOVERY_OFFSET,
             recovery_tau: MEASURED_RECOVERY_TAU,
             anticipation_offset: MEASURED_ANTICIPATION_OFFSET,
+            sigma_baseline: MEASURED_SIGMA_BASELINE,
+            sigma_peak_amplitude: MEASURED_SIGMA_PEAK_AMPLITUDE,
+            sigma_peak_gap: MEASURED_SIGMA_PEAK_GAP,
+            sigma_width: MEASURED_SIGMA_WIDTH,
         }
     }
 }
@@ -624,6 +658,33 @@ impl ErrorModel {
         };
 
         self.recovery_offset * (-gap_ms / tau).exp() + self.anticipation_offset
+    }
+
+    /// Sigma scale factor based on gap time to previous note.
+    ///
+    /// Returns a multiplier on the base sigma, following a Gaussian curve:
+    /// `sigma_multiplier = (baseline + amplitude * exp(-(gap - peak)^2 / (2 * width^2))) / 12.0`
+    ///
+    /// The division by 12.0 normalizes to the baseline sigma used in the model.
+    /// At sparse gaps (200ms+): factor ≈ 1.3 (wider than baseline)
+    /// At peak density (~114ms): factor ≈ 2.1 (much wider)
+    /// At very dense (<50ms): factor ≈ 1.6 (moderately wider)
+    pub fn sigma_scale_from_gap(&self, gap_ms: f64) -> f64 {
+        if self.sigma_baseline == 0.0 && self.sigma_peak_amplitude == 0.0 {
+            return 1.0; // Disabled
+        }
+
+        if !gap_ms.is_finite() {
+            // No predecessor: use baseline
+            return self.sigma_baseline / 12.0;
+        }
+
+        let deviation = gap_ms - self.sigma_peak_gap;
+        let exponent = -(deviation * deviation) / (2.0 * self.sigma_width * self.sigma_width);
+        let sigma = self.sigma_baseline + self.sigma_peak_amplitude * exponent.exp();
+
+        // Normalize to baseline sigma of 12ms
+        sigma / 12.0
     }
 
     /// The timing error standard deviation, in ms, for local difficulty

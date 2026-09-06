@@ -664,8 +664,8 @@ pub struct SunnyManiaDifficultyAttributes {
     /// independent of any particular score. Factors in: window tightness (OD),
     /// expected baseline accuracy, LN structure.
     ///
-    /// Range roughly [0.85, 1.15] where:
-    /// - Low OD with easy structure → ~0.85-0.95 (easier to acc)
+    /// Range roughly [0.75, 1.15] where:
+    /// - Low OD with easy structure → ~0.75-0.95 (easier to acc)
     /// - High OD with complex LN → ~1.05-1.15 (harder to acc)
     /// - Typical maps → ~1.0
     pub timing_difficulty_factor: f64,
@@ -699,7 +699,7 @@ pub struct SunnyManiaPerformanceAttributes {
     pub timing_core_sigma: f64,
     /// Debug: Map-based timing difficulty factor (from SR phase)
     pub timing_map_factor: f64,
-    /// Debug: Score-based timing adjustment multiplier
+    /// Debug: Score-based timing adjustment multiplier (clamped)
     pub timing_score_adjustment: f64,
     /// Debug: Player's total loss from per-judgement analysis
     pub timing_player_loss: f64,
@@ -822,56 +822,57 @@ fn compute_map_timing_difficulty(
     // Lower expected acc (tight windows) = harder map = boost factor
     // Higher expected acc (loose windows) = easier map = reduce factor
     //
-    // Observed range: ~0.986 (HR tight) to ~0.998 (EZ loose)
-    // Use 0.994 as baseline (typical NM):
-    // - 0.998 (EZ) → 0.94 factor (-6%)
-    // - 0.994 (NM baseline) → 1.0 factor
-    // - 0.986 (HR) → 1.12 factor (+12%)
-    const BASELINE_ACC: f64 = 0.994;
-    const ACC_SCALE: f64 = 15.0; // 0.001 acc diff = 0.015 factor diff
+    // Observed range: ~0.94 to ~0.99 in typical dataset
+    // Use 0.980 as baseline (median):
+    // - 0.99+ (easier) → factor below 1.0
+    // - 0.980 (baseline) → 1.0 factor
+    // - 0.94-0.97 (harder) → factor above 1.0
+    const BASELINE_ACC: f64 = 0.980;
+    const ACC_SCALE: f64 = 1.0; // 0.001 acc diff = 0.001 factor diff
 
     let window_factor = 1.0 + (BASELINE_ACC - expected_acc) * ACC_SCALE;
 
-    // LN density and complexity
-    let ln_ratio = attrs.n_long_notes as f64 / attrs.n_objects as f64;
+    // // LN density and complexity
+    // let ln_ratio = attrs.n_long_notes as f64 / attrs.n_objects as f64;
 
-    // High LN% with varied durations = harder to acc (反键 effect)
-    // Calculate duration variance from buckets
-    let ln_factor = if ln_ratio > 0.3 {
-        // Significant LN presence
-        let total_ln = attrs.n_long_notes as f64;
-        if total_ln > 0.0 {
-            // Check if LN durations are spread across buckets (反键-like)
-            let buckets_used = attrs
-                .ln_duration_buckets
-                .iter()
-                .filter(|&&count| count > 0)
-                .count();
+    // // High LN% with varied durations = harder to acc (反键 effect)
+    // // Calculate duration variance from buckets
+    // let ln_factor = if ln_ratio > 0.3 {
+    //     // Significant LN presence
+    //     let total_ln = attrs.n_long_notes as f64;
+    //     if total_ln > 0.0 {
+    //         // Check if LN durations are spread across buckets (反键-like)
+    //         let buckets_used = attrs
+    //             .ln_duration_buckets
+    //             .iter()
+    //             .filter(|&&count| count > 0)
+    //             .count();
 
-            if buckets_used >= 3 && ln_ratio > 0.5 {
-                // High LN% with varied durations - modest boost
-                1.03
-            } else {
-                1.0
-            }
-        } else {
-            1.0
-        }
-    } else {
-        1.0
-    };
+    //         if buckets_used >= 3 && ln_ratio > 0.5 {
+    //             // High LN% with varied durations - modest boost
+    //             1.03
+    //         } else {
+    //             1.0
+    //         }
+    //     } else {
+    //         1.0
+    //     }
+    // } else {
+    //     1.0
+    // };
 
-    // Combine factors
-    let combined = window_factor * ln_factor;
+    // // Combine factors
+    // let combined = window_factor * ln_factor;
+    let combined = window_factor;
 
-    // Clamp to reasonable range [0.85, 1.15]
-    combined.clamp(0.85, 1.15)
+    // Clamp to reasonable range [0.75, 1.15]
+    combined.clamp(0.75, 1.15)
 }
 
 /// Result of per-judgement timing adjustment calculation.
 #[derive(Clone, Copy, Debug)]
 struct TimingAdjustmentDebug {
-    /// Final multiplier applied
+    /// Final multiplier applied (clamped)
     multiplier: f64,
     /// Player's total loss (weighted sum)
     player_loss: f64,
@@ -932,7 +933,7 @@ fn compute_per_judgement_timing_adjustment(
 
     // For first iteration: uniform penalty weights (should reproduce similar to total acc ratio)
     // Later we'll introduce asymmetric matrix
-    const PENALTY_WEIGHTS: [f64; 6] = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+    const PENALTY_WEIGHTS: [f64; 6] = [1.0, 1.1, 1.2, 1.4, 1.8, 2.6];
 
     // Calculate per-judgement loss contributions
     let mut total_player_loss = 0.0;
@@ -959,11 +960,12 @@ fn compute_per_judgement_timing_adjustment(
     // loss_diff = 0 (as expected) → multiplier = 1.0
     // loss_diff > 0 (worse than expected) → multiplier < 1.0
     //
-    // Scale factor: 0.01 loss diff ≈ 5% multiplier change
-    // Example: diff = -0.02 (2% better) → +10% multiplier → 1.10
-    //          diff = +0.02 (2% worse) → -10% multiplier → 0.90
-    const SCALE: f64 = 5.0;
-    let multiplier = (1.0 - loss_diff * SCALE).clamp(0.85, 1.15);
+    // Scale factor: 0.01 loss diff ≈ 2.5% multiplier change (dialed back from 5.0)
+    // Example: diff = -0.02 (2% better) → +5% multiplier → 1.05
+    //          diff = +0.02 (2% worse) → -5% multiplier → 0.95
+    const SCALE: f64 = 1.0;
+    let unclamped_multiplier = 1.0 - loss_diff * SCALE;
+    let multiplier = unclamped_multiplier.clamp(0.75, 1.15);
 
     TimingAdjustmentDebug {
         multiplier,
@@ -1055,7 +1057,6 @@ fn calculate_performance_inner(
     let xxy_pp = xxy_pp_pattern + xxy_pp_accuracy;
 
     // Two-part timing adjustment:
-    // 1. Map-based factor (computed in SR, same for all scores on this map)
     let map_timing_factor = attrs.timing_difficulty_factor;
 
     // 2. Score-based adjustment: per-judgement loss analysis
@@ -1064,7 +1065,7 @@ fn calculate_performance_inner(
     let score_timing_adjustment = timing_debug.multiplier;
 
     // Combine both factors
-    let timing_multiplier = map_timing_factor * score_timing_adjustment;
+    let timing_multiplier = (score_timing_adjustment + map_timing_factor) - 1.0;
 
     // Apply timing multiplier on top of Sunny's accuracy system
     let pp_with_timing = xxy_pp * timing_multiplier;
@@ -1118,6 +1119,7 @@ pub(crate) fn normalize_for_human_reference(
     normalized.xxy_pp_pattern *= multiplier;
     normalized.xxy_pp_accuracy *= multiplier;
     normalized.pp_timing *= multiplier;
+    normalized.pp_difficulty *= multiplier;
 
     normalized
 }
@@ -1442,6 +1444,8 @@ fn units_from_input_state_bins(
                 f64::from(plain_count) * per_operation,
             );
             unit.fading_mean_offset = class_offset;
+            // Apply gap-based sigma scaling
+            unit.sigma_scale *= model.sigma_scale_from_gap(bin.mean_gap_ms);
             units.push(unit);
         }
 
@@ -1453,6 +1457,8 @@ fn units_from_input_state_bins(
                 bin.mean_duration_ms,
             );
             unit.fading_mean_offset = class_offset;
+            // Apply gap-based sigma scaling
+            unit.sigma_scale *= model.sigma_scale_from_gap(bin.mean_gap_ms);
             units.push(unit);
         }
     }
@@ -1534,7 +1540,6 @@ fn units_from_difficulty_bins(
 /// Result of timing pp calculation with component breakdown.
 #[derive(Clone, Copy, Debug, Default)]
 struct TimingPpResult {
-    loss_ratio: f64,
     expected_accuracy: f64,
     reference_accuracy: f64,
     core_sigma: f64,
@@ -1559,7 +1564,6 @@ fn compute_timing_pp(
 
     if total == 0 || attrs.n_objects == 0 || attrs.stars <= 0.0 {
         return TimingPpResult {
-            loss_ratio: 1.0,
             expected_accuracy: 1.0,
             reference_accuracy: 1.0,
             core_sigma: TIMING_BASELINE_SIGMA,
@@ -1614,7 +1618,6 @@ fn compute_timing_pp(
     let reference_accuracy = reference.custom_accuracy();
 
     TimingPpResult {
-        loss_ratio: 1.0, // Not used in the new approach
         expected_accuracy,
         reference_accuracy,
         core_sigma: fitted_sigma,
@@ -1629,7 +1632,6 @@ fn compute_timing_pp_with_units(
 ) -> TimingPpResult {
     if total <= 0.0 || attrs.n_objects == 0 || attrs.stars <= 0.0 {
         return TimingPpResult {
-            loss_ratio: 1.0,
             expected_accuracy: 1.0,
             reference_accuracy: 1.0,
             core_sigma: TIMING_BASELINE_SIGMA,
@@ -1651,7 +1653,7 @@ fn compute_timing_pp_with_units(
     let expected =
         expected_counts_at_core_sigma(units, &attrs.hit_windows, model, TIMING_BASELINE_SIGMA);
     let expected_accuracy = expected.custom_accuracy();
-    let expected_loss = (1.0 - expected_accuracy).max(f64::EPSILON);
+    // let expected_loss = (1.0 - expected_accuracy).max(f64::EPSILON);
 
     // Reference: same baseline precision through neutral conditions (no input-state offsets).
     let reference_model = ErrorModel {
@@ -1675,7 +1677,6 @@ fn compute_timing_pp_with_units(
     let reference_loss = (1.0 - reference_accuracy).max(f64::EPSILON);
 
     TimingPpResult {
-        loss_ratio: expected_loss / reference_loss,
         expected_accuracy,
         reference_accuracy,
         core_sigma: TIMING_BASELINE_SIGMA,
