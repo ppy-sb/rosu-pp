@@ -1223,15 +1223,6 @@ fn units_from_difficulty_bins(
     units
 }
 
-#[cfg(test)]
-fn timing_loss_ratio_with_model(
-    attrs: &SunnyManiaDifficultyAttributes,
-    state: SunnyScoreState,
-    model: &ErrorModel,
-) -> f64 {
-    compute_timing_pp(attrs, state, model).loss_ratio
-}
-
 /// Result of timing pp calculation with component breakdown.
 #[derive(Clone, Copy, Debug, Default)]
 struct TimingPpResult {

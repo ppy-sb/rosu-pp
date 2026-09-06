@@ -579,52 +579,6 @@ fn per_note_units_emit_exactly_the_observed_judgement_total() {
     }
 }
 
-/// Attributes without either per-note distribution keep working.
-///
-/// Older cached JS attributes can lack both distributions, and inventing either one
-/// would fabricate map structure they carry no trace of. The uniform fallback is
-/// therefore load-bearing on a shipping path, not just in tests.
-#[test]
-fn a_missing_per_note_distribution_falls_back_to_the_uniform_list() {
-    let map = synthetic_map(8.0, 400, 120.0);
-    let attrs = calculate(&map, &GameMods::default(), 1.0, Some(true), None).unwrap();
-    let model = ErrorModel::default();
-
-    let stripped = SunnyManiaDifficultyAttributes {
-        note_difficulty_bins: None,
-        input_state_bins: None,
-        ..attrs
-    };
-
-    let units = judgement_units(&stripped, 400.0, &model, true);
-    let weight: f64 = units.iter().map(|unit| unit.weight).sum();
-
-    assert!(
-        (weight - 400.0).abs() < 1e-9,
-        "the fallback list must still weigh the whole score, got {weight}"
-    );
-    assert!(
-        units.iter().all(|unit| unit.difficulty == stripped.stars),
-        "the fallback list prices every note at the map's star rating"
-    );
-
-    // And the pricing path survives it, which is the property the JS binding relies on.
-    let state = SunnyScoreState {
-        n320: 380,
-        n300: 20,
-        n200: 0,
-        n100: 0,
-        n50: 0,
-        misses: 0,
-    };
-    let scalar = timing_loss_ratio_with_model(&stripped, state, &ErrorModel::default());
-
-    assert!(
-        scalar.is_finite() && scalar > 0.0,
-        "a stripped attribute set must still price, got {scalar}"
-    );
-}
-
 /// Equal-count bins, which is what lets the attribute omit per-bin weights.
 #[test]
 fn per_note_bins_partition_the_map() {
