@@ -4570,116 +4570,106 @@ fn multiuser_report() {
         (mean_surface_multiplier - 1.0) * 100.0
     );
 
-    let report_composition = |label: &str, mut rows: Vec<&MultiPriced>| {
-        rows.sort_by(|a, b| {
-            let a_scalar = if a.perf.xxy_pp_pattern.abs() > f64::EPSILON {
-                a.perf.pp / a.perf.xxy_pp_pattern
-            } else {
-                1.0
-            };
-            let b_scalar = if b.perf.xxy_pp_pattern.abs() > f64::EPSILON {
-                b.perf.pp / b.perf.xxy_pp_pattern
-            } else {
-                1.0
-            };
-            let a_delta = a_scalar / mean_surface_multiplier - 1.0;
-            let b_delta = b_scalar / mean_surface_multiplier - 1.0;
-            b_delta.total_cmp(&a_delta)
-        });
-
-        println!("\n{label} ({} scores; at most 40 shown)", rows.len());
-        println!(
-            "{:>6} {:>8} {:>9} {:>4} {:>5} {:>6} {:>8} {:>8}  {:>8} + {:>8} = {:>8}  x {:>6} x {:>6} x {:>6}",
-            "uid",
-            "map",
-            "mods",
-            "od",
-            "LN%",
-            "acc%",
-            "surface%",
-            "live%",
-            "pattern",
-            "timing",
-            "total",
-            "accMul",
-            "var",
-            "length"
-        );
-
-        for r in rows.into_iter().take(40) {
-            let surface_delta = (r.perf.pp / r.perf.xxy_pp_pattern - 1.0) * 100.0;
-            let live_delta = (r.perf.pp / r.row.live_pp - 1.0) * 100.0;
-            println!(
-                "{:>6} {:>8} {:>9} {:>4.1} {:>5.0} {:>6.2} {:+8.2} {:+8.2}  {:>8.1} + {:>8.1} = {:>8.1}  x {:>6.3} x {:>6.3} x {:>6.3}",
-                r.row.uid,
-                r.row.map_id,
-                r.row.mods,
-                r.map.od,
-                100.0
-                    * (if r.attrs.n_objects > 0 {
-                        r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
-                    } else {
-                        0.0
-                    }),
-                r.row.acc,
-                surface_delta,
-                live_delta,
-                r.perf.xxy_pp_pattern,
-                r.perf.pp_timing,
-                r.perf.pp,
-                r.perf.acc_multiplier,
-                r.perf.variety_multiplier,
-                r.perf.length_multiplier,
-            );
-        }
-    };
-
-    report_composition(
-        "surface gains above 20% relative to cohort mean",
-        all.iter()
-            .copied()
-            .filter(|r| {
-                (if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
-                    r.perf.pp / r.perf.xxy_pp_pattern
-                } else {
-                    1.0
-                }) / mean_surface_multiplier
-                    > 1.20
-            })
-            .collect(),
-    );
-    report_composition(
-        "non-EZ surface losses below -5% relative to cohort mean",
-        all.iter()
-            .copied()
-            .filter(|r| {
-                !r.row.mods.contains("EZ")
-                    && (if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
-                        r.perf.pp / r.perf.xxy_pp_pattern
-                    } else {
-                        1.0
-                    }) / mean_surface_multiplier
-                        < 0.95
-            })
-            .collect(),
-    );
-    report_composition(
-        "uid 3110: low OD or cohort-relative surface movement above 10%",
-        all.iter()
-            .copied()
-            .filter(|r| {
-                r.row.uid == "3110"
-                    && (r.map.od < 7.0
-                        || ((if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+    let report_composition =
+        |label: &str, mut rows: Vec<&MultiPriced>, by_surface: bool, descending: bool| {
+            rows.sort_by(|a, b| {
+                let metric = |r: &MultiPriced| {
+                    if by_surface {
+                        let ratio = if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
                             r.perf.pp / r.perf.xxy_pp_pattern
                         } else {
                             1.0
-                        }) / mean_surface_multiplier
-                            - 1.0)
-                            .abs()
-                            > 0.10)
-            })
-            .collect(),
+                        };
+                        ratio / mean_surface_multiplier - 1.0
+                    } else if r.row.live_pp > 0.0 {
+                        r.perf.pp / r.row.live_pp - 1.0
+                    } else {
+                        0.0
+                    }
+                };
+                let ordering = metric(b).total_cmp(&metric(a));
+                if descending {
+                    ordering
+                } else {
+                    ordering.reverse()
+                }
+            });
+
+            println!("\n{label} ({} scores; showing up to 40)", rows.len());
+            let mut table = Table::new();
+            table.load_preset(comfy_table::presets::NOTHING);
+            table.set_content_arrangement(ContentArrangement::Dynamic);
+            table.set_header(vec![
+                "uid",
+                "map",
+                "mods",
+                "OD",
+                "keys",
+                "LN%",
+                "difficulty",
+                "live",
+                "current",
+                "timing",
+                "acc%",
+                "acc x var x len x timing",
+            ]);
+
+            for r in rows.into_iter().take(40) {
+                table.add_row(vec![
+                    Cell::new(&r.row.uid),
+                    Cell::new(&r.row.map_id),
+                    Cell::new(&r.row.mods),
+                    Cell::new(format!("{:.1}", r.map.od)),
+                    Cell::new(format!("{:.1}", r.row.keys)),
+                    Cell::new(format!(
+                        "{:.0}",
+                        100.0
+                            * (if r.attrs.n_objects > 0 {
+                                r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                            } else {
+                                0.0
+                            })
+                    )),
+                    Cell::new(format!("{:.1}", r.perf.pp_difficulty)),
+                    Cell::new(format!("{:.1}", r.row.live_pp)),
+                    Cell::new(format!("{:.1}", r.perf.pp)),
+                    Cell::new(format!("{:+.1}", r.perf.pp_timing)),
+                    Cell::new(format!("{:.2}", r.row.acc)),
+                    Cell::new(format!(
+                        "{:.3} x {:.3} x {:.3} x {:.3}",
+                        r.perf.acc_multiplier,
+                        r.perf.variety_multiplier,
+                        r.perf.length_multiplier,
+                        r.perf.timing_score_adjustment
+                    )),
+                ]);
+            }
+            println!("{table}");
+        };
+
+    report_composition(
+        "largest PP gains vs live",
+        all.iter().copied().collect(),
+        false,
+        true,
+    );
+    report_composition(
+        "largest PP losses vs live",
+        all.iter().copied().collect(),
+        false,
+        false,
+    );
+    report_composition(
+        "largest surface effects above cohort mean",
+        all.iter().copied().collect(),
+        true,
+        true,
+    );
+    report_composition(
+        "largest surface effects below cohort mean",
+        all.iter().copied().collect(),
+        true,
+        false,
     );
 
     // Our star rating against the live server's, which is the other half of the
