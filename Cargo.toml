@@ -21,6 +21,7 @@ rosu-map = { version = "0.2.1" }
 rosu-mods = { version = "0.4.0" }
 
 [dev-dependencies]
+comfy-table = "7.1"
 divan = { version = "0.1.21" }
 dhat = "0.3"
 proptest = { version = "1.8.0" }

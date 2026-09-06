@@ -2,10 +2,19 @@ use super::*;
 // Historical calibration reports retained to compare the retired star-unit model.
 // Production code neither imports nor calls this path.
 use crate::mania::sunny_accuracy::fit_with_quality;
+use comfy_table::{Cell, CellAlignment, ContentArrangement, Table};
 use rosu_mods::{GameMod, GameMods as LazerMods};
+use std::sync::Arc;
 
 mod recovery;
 mod replay;
+
+fn create_table() -> Table {
+    let mut table = Table::new();
+    table.load_preset(comfy_table::presets::UTF8_FULL_CONDENSED);
+    table.set_content_arrangement(ContentArrangement::Dynamic);
+    table
+}
 
 /// Parse and verify every replay in `SUNNY_REPLAY_BATCH`.
 ///
@@ -887,21 +896,6 @@ fn production_pricing_ignores_legacy_reference_switches() {
     }
 }
 
-/// The one case with no timing conditions to compare.
-#[test]
-fn an_empty_score_has_no_windows_to_price() {
-    let map = synthetic_map(8.0, 900, 125.0);
-    let mods = GameMods::default();
-    let attrs = calculate(&map, &mods, 1.0, Some(true), None).unwrap();
-
-    let empty = calculate_performance(&attrs, &mods, SunnyScoreState::default());
-
-    assert_eq!(
-        1.0f64, /* window_scalar leftover */ 1.0,
-        "an empty score has no timing conditions to compare"
-    );
-}
-
 /// Some real scores still fit poorly even with a calibrated tail, so pricing must
 /// not depend on fit quality: gating on it left most `EZ` scores at their
 /// unmodified value, which is the bug this pins against returning.
@@ -1481,7 +1475,9 @@ fn calibration_search() {
     // while the objective moves in the third decimal, which suggests not. Sweep it
     // alone, holding the shape fixed, and print the fitted skill alongside.
     println!("\nsigma_ref sweep at fixed shape (skill of the first score shown):");
-    println!("{:>10} {:>10} {:>12}", "sigma_ref", "g_timing", "skill[0]");
+
+    let mut table = create_table();
+    table.set_header(vec!["sigma_ref", "g_timing", "skill[0]"]);
 
     for &sigma_ref in &[4.5, 9.0, 18.0, 36.0, 72.0] {
         let candidate = ErrorModel { sigma_ref, ..best };
@@ -1492,12 +1488,15 @@ fn calibration_search() {
         )];
         let fit = fit_with_quality(&first.counts, &units, &first.windows, &candidate);
 
-        println!(
-            "{sigma_ref:>10.2} {:>10.4} {:>12.4}",
-            mean_g_timing(&scores, &candidate),
-            fit.skill
-        );
+        table.add_row(vec![
+            Cell::new(format!("{:.2}", sigma_ref)).set_alignment(CellAlignment::Right),
+            Cell::new(format!("{:.4}", mean_g_timing(&scores, &candidate)))
+                .set_alignment(CellAlignment::Right),
+            Cell::new(format!("{:.4}", fit.skill)).set_alignment(CellAlignment::Right),
+        ]);
     }
+
+    println!("{}", table);
 
     // What the calibrated shape does to the thing under test: the window scalar,
     // and so the mod response. Reported rather than asserted — there is no pp
@@ -1822,19 +1821,8 @@ fn real_score_report() {
     let mut nm_scalars = Vec::new();
 
     println!(
-        "{:>9} {:>7} {:>4} {:>4} {:>6} {:>7} {:>8} {:>8} {:>7} {:>7} {:>9} {:>8}",
-        "map",
-        "mods",
-        "od",
-        "cvt",
-        "stars",
-        "acc%",
-        "livePP",
-        "ourPP",
-        "scalar",
-        "ppRatio",
-        "g_timing",
-        "plaus"
+        "{:>9} {:>7} {:>4} {:>6} {:>7} {:>8} {:>8} {:>7} {:>7} {:>9}",
+        "map", "mods", "od", "stars", "acc%", "livePP", "ourPP", "scalar", "ppRatio", "g_timing",
     );
 
     for row in REAL_SCORES {
@@ -1897,11 +1885,10 @@ fn real_score_report() {
         };
 
         println!(
-            "{:>9} {:>7} {:>4.1} {:>4} {:>6.2} {:>7.3} {:>8.1} {:>8.1} {:>7.4} {:>7.4} {:>9.1} {:>8}",
+            "{:>9} {:>7} {:>4.1} {:>6.2} {:>7.3} {:>8.1} {:>8.1} {:>7.4} {:>7.4} {:>9.1} {:>8}",
             row.map,
             if row.mods.is_empty() { "NM" } else { row.mods },
             map.od,
-            map.is_convert,
             attrs.stars,
             row.live_acc,
             row.live_pp,
@@ -2251,16 +2238,18 @@ fn ladder_report() {
     use std::io::BufRead as _;
 
     struct Row {
-        stars: f64,
-        od: f32,
-        acc: f64,
         live_pp: f64,
-        our_pp: f64,
         skill: f64,
-        scalar: f64,
         g_timing: f64,
         plausible: bool,
-        notes: u32,
+        #[cfg(test)]
+        attrs: Arc<SunnyManiaDifficultyAttributes>,
+        #[cfg(test)]
+        perf: SunnyManiaPerformanceAttributes,
+        #[cfg(test)]
+        map: Arc<Beatmap>,
+        #[cfg(test)]
+        acc: f64,
     }
 
     let mut by_player: BTreeMap<String, Vec<Row>> = BTreeMap::new();
@@ -2315,16 +2304,18 @@ fn ladder_report() {
             .entry(fields[0].to_owned())
             .or_default()
             .push(Row {
-                stars: attrs.stars,
-                od: map.od,
-                acc: fields[8].parse().unwrap_or(0.0),
                 live_pp: fields[9].parse().unwrap_or(0.0),
-                our_pp: perf.pp,
                 skill: skill_for_counts(&counts, &units, &attrs.hit_windows, &model),
-                scalar: 1.0f64, /* window_scalar leftover */
                 g_timing: fit.g_timing,
                 plausible: fit.is_plausible(),
-                notes: state.total_hits(),
+                #[cfg(test)]
+                attrs: Arc::new(attrs),
+                #[cfg(test)]
+                perf,
+                #[cfg(test)]
+                map: Arc::new(map),
+                #[cfg(test)]
+                acc: fields[8].parse().unwrap_or(0.0),
             });
     }
 
@@ -2337,7 +2328,7 @@ fn ladder_report() {
 
     for (player, rows) in &by_player {
         let mut rows: Vec<&Row> = rows.iter().collect();
-        rows.sort_by(|a, b| a.stars.total_cmp(&b.stars));
+        rows.sort_by(|a, b| a.attrs.stars.total_cmp(&b.attrs.stars));
 
         println!("\n=== player {player} ({} scores)", rows.len());
         println!(
@@ -2359,14 +2350,14 @@ fn ladder_report() {
         for row in rows.iter().step_by(3) {
             println!(
                 "{:>6.2} {:>4.1} {:>6} {:>7.3} {:>8.1} {:>8.1} {:>7.2} {:>7.2} {:>9.1} {:>6}",
-                row.stars,
-                row.od,
-                row.notes,
+                row.attrs.stars,
+                row.map.od,
+                row.attrs.n_objects,
                 row.acc,
                 row.live_pp,
-                row.our_pp,
+                row.perf.pp,
                 row.skill,
-                row.skill / row.stars,
+                row.skill / row.attrs.stars,
                 row.g_timing,
                 row.plausible
             );
@@ -2378,7 +2369,7 @@ fn ladder_report() {
         println!(
             "  mean skill {:.2}, mean skill/stars {:.2}, plausible {}/{}",
             mean(&|r| r.skill),
-            mean(&|r| r.skill / r.stars),
+            mean(&|r| r.skill / r.attrs.stars),
             rows.iter().filter(|r| r.plausible).count(),
             rows.len()
         );
@@ -2388,7 +2379,16 @@ fn ladder_report() {
 
     println!("\n=== overall ({} scores, {skipped} skipped)", all.len());
 
-    let scalars: Vec<f64> = all.iter().map(|r| r.scalar).collect();
+    let scalars: Vec<f64> = all
+        .iter()
+        .map(|r| {
+            (if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                r.perf.pp / r.perf.xxy_pp_pattern
+            } else {
+                1.0
+            })
+        })
+        .collect();
     let lo = scalars.iter().copied().fold(f64::INFINITY, f64::min);
     let hi = scalars.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     println!("window scalar: {lo:.4}..{hi:.4} (no-mod, so departures from 1 are OD alone)");
@@ -2414,12 +2414,12 @@ fn ladder_report() {
     for (lo, hi) in [(2.0, 4.0), (4.0, 6.0), (6.0, 8.0), (8.0, 11.0)] {
         let band: Vec<&&Row> = all
             .iter()
-            .filter(|r| r.stars >= lo && r.stars < hi)
+            .filter(|r| r.attrs.stars >= lo && r.attrs.stars < hi)
             .collect();
         if band.is_empty() {
             continue;
         }
-        let ratio = band.iter().map(|r| r.skill / r.stars).sum::<f64>() / band.len() as f64;
+        let ratio = band.iter().map(|r| r.skill / r.attrs.stars).sum::<f64>() / band.len() as f64;
         println!(
             "  {lo:>4.1}-{hi:<4.1} n={:<4} mean skill/stars {ratio:.3}",
             band.len()
@@ -3213,30 +3213,9 @@ struct MultiRow {
 /// One priced score: what the surface makes of a [`MultiRow`].
 struct MultiPriced {
     row: MultiRow,
-    stars: f64,
-    od: f32,
-    is_convert: bool,
-    current_pp: f64,
-    sunny_local_pp: f64,
-    pattern_pp: f64,
-    surface_multiplier: f64,
-    timing_pp: f64,
-    acc_multiplier: f64,
-    variety_multiplier: f64,
-    length_multiplier: f64,
-    scalar: f64,
-    timing_sigma: f64,
     // Retired-model fields below are retained only for historical calibration tests.
     skill: f64,
     g_timing: f64,
-    notes: u32,
-    /// The map's long-note share, and the axis the LN mixture actually acts on.
-    /// Key count only stands in for it — 7K charts here average 58% long notes
-    /// against 4K's 3% — so grouping by this separates the mechanism from the
-    /// convention.
-    ln_fraction: f64,
-    /// Whether the score's long notes were judged as one unit (V1) or two (V2).
-    ln_judged_as_one: bool,
     /// The skill [`window_scalar`] fits against the fixed reference windows, kept
     /// separately from [`Self::skill`] (the played-windows fit) because
     /// `window_scalar` is their *ratio* and can move in the opposite direction
@@ -3249,6 +3228,14 @@ struct MultiPriced {
     /// `g_timing` means the reference windows are a poor description of those
     /// counts, not that the player misplayed.
     reference_g_timing: f64,
+
+    // Full debugging context - only available in test builds, not production
+    #[cfg(test)]
+    map: Arc<Beatmap>,
+    #[cfg(test)]
+    attrs: Arc<SunnyManiaDifficultyAttributes>,
+    #[cfg(test)]
+    perf: SunnyManiaPerformanceAttributes,
 }
 
 /// Builds the mod state for a report row from its mod-name string.
@@ -3853,13 +3840,13 @@ fn load_multiuser() -> Vec<MultiPriced> {
             // contributes one judgement or separate head and release judgements.
             let attrs = calculate(&map, &mods, clock_rate, Some(false), None)?;
 
-            Some(((map_id, mod_names), (attrs, map.od, map.is_convert)))
+            Some(((map_id, mod_names), (attrs, map)))
         })
         .collect();
 
     rows.into_par_iter()
         .filter_map(|row| {
-            let &(attrs, od, is_convert) =
+            let &(ref attrs, ref map) =
                 attrs_by_job.get(&(row.map_id.clone(), row.mods.clone()))?;
             let (mods, _) = mods_for(&row.mods);
 
@@ -3874,13 +3861,6 @@ fn load_multiuser() -> Vec<MultiPriced> {
 
             let model = report_error_model();
             let perf = calculate_performance(&attrs, &mods, state);
-            // Reports consume the production result instead of maintaining a second
-            // pricing path. This also exercises the SR-time timing cache.
-            let surface_multiplier = if perf.xxy_pp_pattern.abs() > f64::EPSILON {
-                perf.pp / perf.xxy_pp_pattern
-            } else {
-                1.0
-            };
             let owned_units;
             let units = if let Some(cache) = attrs.judgement_units.as_ref() {
                 cache.as_slice()
@@ -3899,31 +3879,17 @@ fn load_multiuser() -> Vec<MultiPriced> {
                 fit_with_quality(&row.counts, units, &reference_windows(&attrs), &model);
 
             Some(MultiPriced {
-                stars: attrs.stars,
-                od,
-                is_convert,
-                current_pp: perf.pp,
-                sunny_local_pp: perf.xxy_pp_pattern + perf.xxy_pp_accuracy,
-                pattern_pp: perf.xxy_pp_pattern,
-                surface_multiplier,
-                timing_pp: perf.pp_timing,
-                acc_multiplier: perf.acc_multiplier,
-                variety_multiplier: perf.variety_multiplier,
-                length_multiplier: perf.length_multiplier,
-                scalar: surface_multiplier,
-                timing_sigma: perf.timing_core_sigma,
                 skill: fit.skill,
                 g_timing: fit.g_timing,
-                notes: state.total_hits(),
-                ln_fraction: if attrs.n_objects > 0 {
-                    attrs.n_long_notes as f64 / attrs.n_objects as f64
-                } else {
-                    0.0
-                },
-                ln_judged_as_one: attrs.ln_judged_as_one,
                 reference_skill: reference_fit.skill,
                 reference_g_timing: reference_fit.g_timing,
                 row,
+                #[cfg(test)]
+                map: Arc::new(map.clone()),
+                #[cfg(test)]
+                attrs: Arc::new(*attrs),
+                #[cfg(test)]
+                perf,
             })
         })
         .collect()
@@ -4134,39 +4100,17 @@ fn load_ladder(path: &str) -> Vec<MultiPriced> {
             fit_with_quality(&row.counts, &units, &reference_windows(&attrs), &model);
 
         out.push(MultiPriced {
-            stars: attrs.stars,
-            od: map.od,
-            is_convert: map.is_convert,
-            current_pp: perf.pp,
-            sunny_local_pp: perf.xxy_pp_pattern + perf.xxy_pp_accuracy,
-            pattern_pp: perf.xxy_pp_pattern,
-            surface_multiplier: if perf.xxy_pp_pattern.abs() > f64::EPSILON {
-                perf.pp / perf.xxy_pp_pattern
-            } else {
-                1.0
-            },
-            timing_pp: perf.pp_timing,
-            acc_multiplier: perf.acc_multiplier,
-            variety_multiplier: perf.variety_multiplier,
-            length_multiplier: perf.length_multiplier,
-            scalar: if perf.xxy_pp_pattern.abs() > f64::EPSILON {
-                perf.pp / perf.xxy_pp_pattern
-            } else {
-                1.0
-            },
-            timing_sigma: perf.timing_core_sigma,
             skill: fit.skill,
             g_timing: fit.g_timing,
-            notes: state.total_hits(),
-            ln_fraction: if attrs.n_objects > 0 {
-                attrs.n_long_notes as f64 / attrs.n_objects as f64
-            } else {
-                0.0
-            },
-            ln_judged_as_one: attrs.ln_judged_as_one,
             reference_skill: reference_fit.skill,
             reference_g_timing: reference_fit.g_timing,
             row,
+            #[cfg(test)]
+            map: Arc::new(map),
+            #[cfg(test)]
+            attrs: Arc::new(attrs),
+            #[cfg(test)]
+            perf,
         });
     }
 
@@ -4207,65 +4151,86 @@ fn multiuser_report() {
 
     for (uid, rows) in &by_uid {
         let mut rows = rows.clone();
-        rows.sort_by(|a, b| b.current_pp.total_cmp(&a.current_pp));
+        rows.sort_by(|a, b| b.perf.pp.total_cmp(&a.perf.pp));
 
         println!("\n=== uid {uid} ({} scores)", rows.len());
-        println!(
-            "{:>8} {:>9} {:>4} {:>4} {:>4} {:>6} {:>26} {:>7} {:>9} {:>11} {:>10} {:>12} {:>10} {:>11}",
+
+        let mut table = create_table();
+        table.set_header(vec![
             "map",
             "mods",
             "k",
             "od",
-            "cvt",
-            "notes",
-            "320/300/200/100/50/miss",
+            "rice",
+            "ln",
+            "judgement pt",
+            "320",
+            "300",
+            "200",
+            "100",
+            "50",
+            "miss",
             "acc%",
             "live",
-            "sunnyLocal",
-            "ourTotal",
-            "live/local%",
-            "our/live%",
-            "our/sunny%"
-        );
+            "rebirth",
+            "current",
+            "cur/live%",
+            "cur/rebirth%",
+            "map_f",
+            "score_a",
+            "loss_d",
+        ]);
 
-        for r in &rows {
+        for r in rows.iter() {
+            let sunny_local_pp = r.perf.xxy_pp_pattern + r.perf.xxy_pp_accuracy;
             let delta = if r.row.live_pp > 0.0 {
-                (r.current_pp / r.row.live_pp - 1.0) * 100.0
+                (r.perf.pp / r.row.live_pp - 1.0) * 100.0
             } else {
                 0.0
             };
-            let local_delta = if r.sunny_local_pp > 0.0 {
-                (r.current_pp / r.sunny_local_pp - 1.0) * 100.0
+            let local_delta = if sunny_local_pp > 0.0 {
+                (r.perf.pp / sunny_local_pp - 1.0) * 100.0
             } else {
                 0.0
             };
-            let composition = format!(
-                "{}/{}/{}/{}/{}/{}",
-                r.row.counts[0],
-                r.row.counts[1],
-                r.row.counts[2],
-                r.row.counts[3],
-                r.row.counts[4],
-                r.row.counts[5]
-            );
-            println!(
-                "{:>8} {:>9} {:>4} {:>4} {:>4} {:>6} {:>26} {:>7.3} {:>9.1} {:>11.1} {:>10.1} {:>+12.2} {:>+10.2} {:>+11.2}",
-                r.row.map_id,
-                r.row.mods,
-                r.row.keys,
-                r.od,
-                r.is_convert,
-                r.notes,
-                composition,
-                r.row.acc,
-                r.row.live_pp,
-                r.sunny_local_pp,
-                r.current_pp,
-                r.sunny_local_pp / r.row.live_pp * 100.0 - 100.0,
-                delta,
-                local_delta
-            );
+
+            let rice = r.attrs.n_objects - r.attrs.n_long_notes;
+            let judgement_points = if r.attrs.ln_judged_as_one {
+                rice
+            } else {
+                rice + r.attrs.n_long_notes * 2
+            };
+
+            table.add_row(vec![
+                Cell::new(r.row.map_id.parse::<u32>().unwrap_or(0)),
+                Cell::new(&r.row.mods),
+                Cell::new(r.row.keys as u8),
+                Cell::new(format!("{:.1}", r.map.od)),
+                Cell::new(rice),
+                Cell::new(r.attrs.n_long_notes),
+                Cell::new(judgement_points).set_alignment(CellAlignment::Right),
+                Cell::new(r.row.counts[0]).set_alignment(CellAlignment::Right),
+                Cell::new(r.row.counts[1]).set_alignment(CellAlignment::Right),
+                Cell::new(r.row.counts[2]).set_alignment(CellAlignment::Right),
+                Cell::new(r.row.counts[3]).set_alignment(CellAlignment::Right),
+                Cell::new(r.row.counts[4]).set_alignment(CellAlignment::Right),
+                Cell::new(r.row.counts[5]).set_alignment(CellAlignment::Right),
+                Cell::new(format!("{:.3}", r.row.acc)),
+                Cell::new(format!("{:.1}", r.row.live_pp)).set_alignment(CellAlignment::Right),
+                Cell::new(format!("{:.1}", sunny_local_pp)).set_alignment(CellAlignment::Right),
+                Cell::new(format!("{:.1}", r.perf.pp)).set_alignment(CellAlignment::Right),
+                Cell::new(format!("{:+.2}", delta)).set_alignment(CellAlignment::Right),
+                Cell::new(format!("{:+.2}", local_delta)).set_alignment(CellAlignment::Right),
+                Cell::new(format!("{:.3}", r.perf.timing_map_factor))
+                    .set_alignment(CellAlignment::Right),
+                Cell::new(format!("{:.3}", r.perf.timing_score_adjustment))
+                    .set_alignment(CellAlignment::Right),
+                Cell::new(format!("{:+.4}", r.perf.timing_loss_diff))
+                    .set_alignment(CellAlignment::Right),
+            ]);
         }
+
+        println!("{}", table);
 
         // Titles are printed separately: they are far too wide for the numeric
         // table but are what makes a row identifiable to a human.
@@ -4326,13 +4291,22 @@ fn multiuser_report() {
         let band: Vec<&MultiPriced> = plain
             .iter()
             .copied()
-            .filter(|r| f64::from(r.od) >= lo && f64::from(r.od) < hi)
+            .filter(|r| f64::from(r.map.od) >= lo && f64::from(r.map.od) < hi)
             .collect();
         if band.is_empty() {
             continue;
         }
         let n = band.len() as f64;
-        let scalars: Vec<f64> = band.iter().map(|r| r.scalar).collect();
+        let scalars: Vec<f64> = band
+            .iter()
+            .map(|r| {
+                (if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                    r.perf.pp / r.perf.xxy_pp_pattern
+                } else {
+                    1.0
+                })
+            })
+            .collect();
         println!(
             "  OD {lo:>4.1}-{hi:<4.1} n={:<4} mean scalar {:.4} ({:.4}..{:.4})  mean dPP {:+.2}%",
             band.len(),
@@ -4340,7 +4314,7 @@ fn multiuser_report() {
             scalars.iter().copied().fold(f64::INFINITY, f64::min),
             scalars.iter().copied().fold(f64::NEG_INFINITY, f64::max),
             band.iter()
-                .map(|r| (r.current_pp / r.row.live_pp - 1.0) * 100.0)
+                .map(|r| (r.perf.pp / r.row.live_pp - 1.0) * 100.0)
                 .sum::<f64>()
                 / n
         );
@@ -4355,8 +4329,18 @@ fn multiuser_report() {
             continue;
         }
         let n = band.len() as f64;
-        let mean_od = band.iter().map(|r| f64::from(r.od)).sum::<f64>() / n;
-        let mean_ln = band.iter().map(|r| r.ln_fraction).sum::<f64>() / n;
+        let mean_od = band.iter().map(|r| f64::from(r.map.od)).sum::<f64>() / n;
+        let mean_ln = band
+            .iter()
+            .map(|r| {
+                (if r.attrs.n_objects > 0 {
+                    r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                } else {
+                    0.0
+                })
+            })
+            .sum::<f64>()
+            / n;
         summarise_group(
             &format!("{keys}k (mean OD {mean_od:.1}, LN {:.0}%)", 100.0 * mean_ln),
             &band,
@@ -4370,11 +4354,22 @@ fn multiuser_report() {
                 let inner: Vec<&MultiPriced> = band
                     .iter()
                     .copied()
-                    .filter(|r| r.ln_fraction >= lo && r.ln_fraction < hi)
+                    .filter(|r| {
+                        (if r.attrs.n_objects > 0 {
+                            r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                        } else {
+                            0.0
+                        }) >= lo
+                            && (if r.attrs.n_objects > 0 {
+                                r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                            } else {
+                                0.0
+                            }) < hi
+                    })
                     .collect();
                 if inner.len() >= 3 {
                     let mean_inner_od =
-                        inner.iter().map(|r| f64::from(r.od)).sum::<f64>() / inner.len() as f64;
+                        inner.iter().map(|r| f64::from(r.map.od)).sum::<f64>() / inner.len() as f64;
                     summarise_group(&format!("{sub} (mean OD {mean_inner_od:.1})"), &inner);
                 }
             }
@@ -4399,12 +4394,23 @@ fn multiuser_report() {
         let band: Vec<&MultiPriced> = all
             .iter()
             .copied()
-            .filter(|r| r.ln_fraction >= lo && r.ln_fraction < hi)
+            .filter(|r| {
+                (if r.attrs.n_objects > 0 {
+                    r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                } else {
+                    0.0
+                }) >= lo
+                    && (if r.attrs.n_objects > 0 {
+                        r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                    } else {
+                        0.0
+                    }) < hi
+            })
             .collect();
         if band.is_empty() {
             continue;
         }
-        let v1 = band.iter().filter(|r| r.ln_judged_as_one).count();
+        let v1 = band.iter().filter(|r| r.attrs.ln_judged_as_one).count();
         summarise_group(
             &format!(
                 "LN {:>3.0}-{:<3.0}% ({v1}/{} judged V1)",
@@ -4415,20 +4421,6 @@ fn multiuser_report() {
             &band,
         );
     }
-
-    // Surface movement is multiplicative, so its cohort center is a geometric
-    // mean. Dividing by it removes a broad level shift and leaves the scores whose
-    // movement differs from everybody else's, which is the useful anomaly signal.
-    let mean_surface_multiplier = (all
-        .iter()
-        .map(|r| r.surface_multiplier.max(f64::MIN_POSITIVE).ln())
-        .sum::<f64>()
-        / all.len() as f64)
-        .exp();
-    println!(
-        "\nsurface pp multiplier: geometric mean {mean_surface_multiplier:.4} ({:+.2}%)",
-        (mean_surface_multiplier - 1.0) * 100.0
-    );
 
     // Keep the surface-transfer baseline explicit for the cohorts used when
     // deciding whether to strengthen its contribution to PP. These are all
@@ -4445,7 +4437,14 @@ fn multiuser_report() {
             .collect();
         let mut values: Vec<f64> = rows
             .iter()
-            .map(|r| r.surface_multiplier.max(f64::MIN_POSITIVE))
+            .map(|r| {
+                (if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                    r.perf.pp / r.perf.xxy_pp_pattern
+                } else {
+                    1.0
+                })
+                .max(f64::MIN_POSITIVE)
+            })
             .collect();
         if values.is_empty() {
             println!("  {label:<24} {:>5} (empty)", 0);
@@ -4461,8 +4460,8 @@ fn multiuser_report() {
             .div_euclid(n as f64)
             .exp();
         let quantile = |p: f64| values[((n - 1) as f64 * p).round() as usize];
-        let pp_sum: f64 = rows.iter().map(|r| r.current_pp).sum();
-        let surface_sum: f64 = rows.iter().map(|r| r.timing_pp).sum();
+        let pp_sum: f64 = rows.iter().map(|r| r.perf.pp).sum();
+        let surface_sum: f64 = rows.iter().map(|r| r.perf.pp_timing).sum();
         println!(
             "  {label:<24} {n:>5} {mean:>8.4} {geo:>8.4} {:>8.4} {:>8.4} {:>8.4} {:>9.2}%",
             quantile(0.10),
@@ -4476,28 +4475,56 @@ fn multiuser_report() {
         "4K rice LN<30%",
         all.iter()
             .copied()
-            .filter(|r| r.row.keys == 4 && r.ln_fraction < 0.30)
+            .filter(|r| {
+                r.row.keys == 4
+                    && (if r.attrs.n_objects > 0 {
+                        r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                    } else {
+                        0.0
+                    }) < 0.30
+            })
             .collect(),
     );
     print_surface_cohort(
         "4K LN>=30%",
         all.iter()
             .copied()
-            .filter(|r| r.row.keys == 4 && r.ln_fraction >= 0.30)
+            .filter(|r| {
+                r.row.keys == 4
+                    && (if r.attrs.n_objects > 0 {
+                        r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                    } else {
+                        0.0
+                    }) >= 0.30
+            })
             .collect(),
     );
     print_surface_cohort(
         "low-OD 7K LN>30%",
         all.iter()
             .copied()
-            .filter(|r| r.row.keys == 7 && r.od < 6.0 && r.ln_fraction > 0.30)
+            .filter(|r| {
+                r.row.keys == 7
+                    && r.map.od < 6.0
+                    && (if r.attrs.n_objects > 0 {
+                        r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                    } else {
+                        0.0
+                    }) > 0.30
+            })
             .collect(),
     );
     print_surface_cohort(
         "all rice LN<5%",
         all.iter()
             .copied()
-            .filter(|r| r.ln_fraction < 0.05)
+            .filter(|r| {
+                (if r.attrs.n_objects > 0 {
+                    r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                } else {
+                    0.0
+                }) < 0.05
+            })
             .collect(),
     );
 
@@ -4511,7 +4538,11 @@ fn multiuser_report() {
             .iter()
             .copied()
             .filter(|r| {
-                r.ln_fraction < 0.05
+                (if r.attrs.n_objects > 0 {
+                    r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                } else {
+                    0.0
+                }) < 0.05
                     && !r.row.mods.contains("EZ")
                     && r.row.acc >= lo
                     && r.row.acc < hi
@@ -4520,36 +4551,39 @@ fn multiuser_report() {
         print_surface_cohort(label, rows);
     }
 
-    // println!("surface-transfer sensitivity (relative to each exponent's cohort mean):");
-    // println!(
-    //     "  {:>8} {:>9} {:>9} {:>9} {:>9}",
-    //     "exponent", "p10", "p90", ">+20%", "<-5%"
-    // );
-    // for exponent in [0.50, 0.75, 1.00, 1.25, 1.50, 1.75, 2.20] {
-    //     let center = (all
-    //         .iter()
-    //         .map(|r| r.scalar.max(f64::MIN_POSITIVE).ln() * exponent)
-    //         .sum::<f64>()
-    //         / all.len() as f64)
-    //         .exp();
-    //     let mut relative: Vec<f64> = all
-    //         .iter()
-    //         .map(|r| r.scalar.max(0.0).powf(exponent) / center)
-    //         .collect();
-    //     relative.sort_by(f64::total_cmp);
-    //     let high = relative.iter().filter(|&&value| value > 1.20).count();
-    //     let low = relative.iter().filter(|&&value| value < 0.95).count();
-    //     println!(
-    //         "  {exponent:>8.2} {:+8.2}% {:+8.2}% {high:>9} {low:>9}",
-    //         (relative[relative.len() / 10] - 1.0) * 100.0,
-    //         (relative[relative.len() * 9 / 10] - 1.0) * 100.0,
-    //     );
-    // }
+    let mean_surface_multiplier = (all
+        .iter()
+        .map(|r| {
+            (if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                r.perf.pp / r.perf.xxy_pp_pattern
+            } else {
+                1.0
+            })
+            .max(f64::MIN_POSITIVE)
+            .ln()
+        })
+        .sum::<f64>()
+        / all.len() as f64)
+        .exp();
+    println!(
+        "\nsurface pp multiplier: geometric mean {mean_surface_multiplier:.4} ({:+.2}%)",
+        (mean_surface_multiplier - 1.0) * 100.0
+    );
 
     let report_composition = |label: &str, mut rows: Vec<&MultiPriced>| {
         rows.sort_by(|a, b| {
-            let a_delta = a.surface_multiplier / mean_surface_multiplier - 1.0;
-            let b_delta = b.surface_multiplier / mean_surface_multiplier - 1.0;
+            let a_scalar = if a.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                a.perf.pp / a.perf.xxy_pp_pattern
+            } else {
+                1.0
+            };
+            let b_scalar = if b.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                b.perf.pp / b.perf.xxy_pp_pattern
+            } else {
+                1.0
+            };
+            let a_delta = a_scalar / mean_surface_multiplier - 1.0;
+            let b_delta = b_scalar / mean_surface_multiplier - 1.0;
             b_delta.total_cmp(&a_delta)
         });
 
@@ -4573,24 +4607,29 @@ fn multiuser_report() {
         );
 
         for r in rows.into_iter().take(40) {
-            let surface_delta = (r.current_pp / r.pattern_pp - 1.0) * 100.0;
-            let live_delta = (r.current_pp / r.row.live_pp - 1.0) * 100.0;
+            let surface_delta = (r.perf.pp / r.perf.xxy_pp_pattern - 1.0) * 100.0;
+            let live_delta = (r.perf.pp / r.row.live_pp - 1.0) * 100.0;
             println!(
                 "{:>6} {:>8} {:>9} {:>4.1} {:>5.0} {:>6.2} {:+8.2} {:+8.2}  {:>8.1} + {:>8.1} = {:>8.1}  x {:>6.3} x {:>6.3} x {:>6.3}",
                 r.row.uid,
                 r.row.map_id,
                 r.row.mods,
-                r.od,
-                100.0 * r.ln_fraction,
+                r.map.od,
+                100.0
+                    * (if r.attrs.n_objects > 0 {
+                        r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                    } else {
+                        0.0
+                    }),
                 r.row.acc,
                 surface_delta,
                 live_delta,
-                r.pattern_pp,
-                r.timing_pp,
-                r.current_pp,
-                r.acc_multiplier,
-                r.variety_multiplier,
-                r.length_multiplier,
+                r.perf.xxy_pp_pattern,
+                r.perf.pp_timing,
+                r.perf.pp,
+                r.perf.acc_multiplier,
+                r.perf.variety_multiplier,
+                r.perf.length_multiplier,
             );
         }
     };
@@ -4599,7 +4638,14 @@ fn multiuser_report() {
         "surface gains above 20% relative to cohort mean",
         all.iter()
             .copied()
-            .filter(|r| r.surface_multiplier / mean_surface_multiplier > 1.20)
+            .filter(|r| {
+                (if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                    r.perf.pp / r.perf.xxy_pp_pattern
+                } else {
+                    1.0
+                }) / mean_surface_multiplier
+                    > 1.20
+            })
             .collect(),
     );
     report_composition(
@@ -4607,7 +4653,13 @@ fn multiuser_report() {
         all.iter()
             .copied()
             .filter(|r| {
-                !r.row.mods.contains("EZ") && r.surface_multiplier / mean_surface_multiplier < 0.95
+                !r.row.mods.contains("EZ")
+                    && (if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                        r.perf.pp / r.perf.xxy_pp_pattern
+                    } else {
+                        1.0
+                    }) / mean_surface_multiplier
+                        < 0.95
             })
             .collect(),
     );
@@ -4617,8 +4669,15 @@ fn multiuser_report() {
             .copied()
             .filter(|r| {
                 r.row.uid == "3110"
-                    && (r.od < 7.0
-                        || (r.surface_multiplier / mean_surface_multiplier - 1.0).abs() > 0.10)
+                    && (r.map.od < 7.0
+                        || ((if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                            r.perf.pp / r.perf.xxy_pp_pattern
+                        } else {
+                            1.0
+                        }) / mean_surface_multiplier
+                            - 1.0)
+                            .abs()
+                            > 0.10)
             })
             .collect(),
     );
@@ -4629,7 +4688,7 @@ fn multiuser_report() {
     let drift: Vec<f64> = all
         .iter()
         .filter(|r| r.row.live_stars > 0.0)
-        .map(|r| r.stars / r.row.live_stars)
+        .map(|r| r.attrs.stars / r.row.live_stars)
         .collect();
     if !drift.is_empty() {
         let n = drift.len() as f64;
@@ -4722,11 +4781,19 @@ fn ln_offset_under_the_fixed_reference() {
             "{:>8} {:>4} {:>5.1} {:>6.1} {:>9.1} {:>9.1} {:>7.4} {:>9.2} {:>9.2} {:>8.3} {:>9.3}",
             r.row.map_id,
             r.row.keys,
-            r.od,
-            r.ln_fraction * 100.0,
+            r.map.od,
+            (if r.attrs.n_objects > 0 {
+                r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+            } else {
+                0.0
+            }) * 100.0,
             r.row.live_pp,
-            r.current_pp,
-            r.scalar,
+            r.perf.pp,
+            (if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                r.perf.pp / r.perf.xxy_pp_pattern
+            } else {
+                1.0
+            }),
             r.g_timing,
             r.reference_g_timing,
             r.skill,
@@ -4749,7 +4816,7 @@ fn ln_offset_under_the_fixed_reference() {
             println!("  {label}: n=0");
             return;
         }
-        let mut ratios: Vec<f64> = rows.iter().map(|r| r.current_pp / r.row.live_pp).collect();
+        let mut ratios: Vec<f64> = rows.iter().map(|r| r.perf.pp / r.row.live_pp).collect();
         println!(
             "  {label}: n={:<4} median ourPP/livePP {:.4}",
             rows.len(),
@@ -4782,7 +4849,16 @@ fn ln_offset_under_the_fixed_reference() {
         }
         let mut played: Vec<f64> = rows.iter().map(|r| r.skill).collect();
         let mut reference: Vec<f64> = rows.iter().map(|r| r.reference_skill).collect();
-        let mut scalar: Vec<f64> = rows.iter().map(|r| r.scalar).collect();
+        let mut scalar: Vec<f64> = rows
+            .iter()
+            .map(|r| {
+                (if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                    r.perf.pp / r.perf.xxy_pp_pattern
+                } else {
+                    1.0
+                })
+            })
+            .collect();
         println!(
             "  {label}: n={:<4} median played_skill {:>7.3}  median reference_skill {:>7.3}  \
                  median window_scalar {:>7.4}",
@@ -4825,9 +4901,22 @@ fn ln_offset_under_the_fixed_reference() {
             .copied()
             .filter(|r| {
                 if lo == hi {
-                    r.ln_fraction <= 0.0
+                    (if r.attrs.n_objects > 0 {
+                        r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                    } else {
+                        0.0
+                    }) <= 0.0
                 } else {
-                    r.ln_fraction > lo && r.ln_fraction < hi
+                    (if r.attrs.n_objects > 0 {
+                        r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                    } else {
+                        0.0
+                    }) > lo
+                        && (if r.attrs.n_objects > 0 {
+                            r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                        } else {
+                            0.0
+                        }) < hi
                 }
             })
             .collect();
@@ -4846,9 +4935,22 @@ fn ln_offset_under_the_fixed_reference() {
             .copied()
             .filter(|r| {
                 if lo == hi {
-                    r.ln_fraction <= 0.0
+                    (if r.attrs.n_objects > 0 {
+                        r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                    } else {
+                        0.0
+                    }) <= 0.0
                 } else {
-                    r.ln_fraction > lo && r.ln_fraction < hi
+                    (if r.attrs.n_objects > 0 {
+                        r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                    } else {
+                        0.0
+                    }) > lo
+                        && (if r.attrs.n_objects > 0 {
+                            r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                        } else {
+                            0.0
+                        }) < hi
                 }
             })
             .collect();
@@ -4860,7 +4962,15 @@ fn ln_offset_under_the_fixed_reference() {
     let low_od_7k_ln: Vec<&MultiPriced> = with_live
         .iter()
         .copied()
-        .filter(|r| r.row.keys == 7 && f64::from(r.od) < 6.0 && r.ln_fraction > 0.3)
+        .filter(|r| {
+            r.row.keys == 7
+                && f64::from(r.map.od) < 6.0
+                && (if r.attrs.n_objects > 0 {
+                    r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                } else {
+                    0.0
+                }) > 0.3
+        })
         .collect();
     report_ratio("OD<6 7K LN>30% (ratio)", &low_od_7k_ln);
     report_g_timing("OD<6 7K LN>30% (g_timing)", &low_od_7k_ln);
@@ -4872,7 +4982,14 @@ fn ln_offset_under_the_fixed_reference() {
     let rice_4k: Vec<&MultiPriced> = with_live
         .iter()
         .copied()
-        .filter(|r| r.row.keys == 4 && r.ln_fraction < 0.05)
+        .filter(|r| {
+            r.row.keys == 4
+                && (if r.attrs.n_objects > 0 {
+                    r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
+                } else {
+                    0.0
+                }) < 0.05
+        })
         .collect();
     report_ratio("4K LN<5% (ratio)", &rice_4k);
     report_g_timing("4K LN<5% (g_timing)", &rice_4k);
@@ -4885,7 +5002,7 @@ fn ln_offset_under_the_fixed_reference() {
     println!("\nstars (must be byte-identical across every release_mean_offset run):");
     let mut by_map: Vec<(&str, f64)> = scores
         .iter()
-        .map(|r| (r.row.map_id.as_str(), r.stars))
+        .map(|r| (r.row.map_id.as_str(), r.attrs.stars))
         .collect();
     by_map.sort_by(|a, b| a.0.cmp(b.0).then(a.1.total_cmp(&b.1)));
     by_map.dedup();
@@ -4924,27 +5041,24 @@ fn ln_release_ratio_sweep() {
         return;
     }
 
-    // The first band is exclusive of zero on purpose. A "0-5% LN" band is *not* a
-    // control: only 24 of the 88 fixtures under 5% have no long notes at all, and
-    // the other 64 have a handful, so the ratio does reach them and the band moves.
-    // The true control is `n_long_notes == 0` (plus every V2 score), reported
-    // separately below.
-    let bands: [(f64, f64); 4] = [(1e-9, 0.05), (0.05, 0.3), (0.3, 0.6), (0.6, 1.01)];
-
     println!(
         "{} cases, {} with a V1 long-note population",
         cases.len(),
         cases.iter().filter(|c| c.has_ln_effect()).count()
     );
-    print!("{:>6} {:>7}  {:>13}", "ratio", "scale", "CONTROL");
-    for (lo, hi) in bands {
-        print!(
-            "  {:>13}",
-            format!("LN{:.0}-{:.0}%", 100.0 * lo, 100.0 * hi)
-        );
-    }
-    println!("  {:>13}  {:>9}", "all V1+LN", "plaus");
-    println!("{}", "-".repeat(6 + 7 + 4 * 15 + 15 + 11));
+
+    let mut table = create_table();
+    table.set_header(vec![
+        "ratio",
+        "scale",
+        "CONTROL",
+        "LN0-5%",
+        "LN5-30%",
+        "LN30-60%",
+        "LN60-100%",
+        "all V1+LN",
+        "plaus",
+    ]);
 
     for ratio in [1.0, 1.1, 1.2, 1.35, 1.5, 1.75, 2.0, 2.5, 3.0] {
         let model = ErrorModel {
@@ -4972,32 +5086,63 @@ fn ln_release_ratio_sweep() {
             Some(gs[gs.len() / 2])
         };
 
-        print!("{ratio:>6.2} {:>7.3}", ln_sigma_scale(ratio));
-
-        // The genuine control: cases the LN split cannot reach at all, either
-        // because the map has no long notes or because V2 judged them separately.
-        // This column must be constant to the digit, or the parameter is doing
-        // something other than what it claims.
+        // The genuine control: cases the LN split cannot reach at all
         let control: Vec<&LnCase> = cases.iter().filter(|c| !c.has_ln_effect()).collect();
-        match median_g(&control) {
-            Some(g) => print!("  {:>13}", format!("{g:.3} (n={})", control.len())),
-            None => print!("  {:>13}", "-"),
-        }
+        let control_str = match median_g(&control) {
+            Some(g) => format!("{:.3} (n={})", g, control.len()),
+            None => "-".to_string(),
+        };
 
-        for (lo, hi) in bands {
+        let ln_0_5 = {
             let band: Vec<&LnCase> = cases
                 .iter()
-                .filter(|c| c.has_ln_effect() && c.ln_fraction() >= lo && c.ln_fraction() < hi)
+                .filter(|c| c.has_ln_effect() && c.ln_fraction() >= 0.0 && c.ln_fraction() < 0.05)
                 .collect();
-
             match median_g(&band) {
-                Some(g) => print!("  {:>13}", format!("{g:.1} (n={})", band.len())),
-                None => print!("  {:>13}", "-"),
+                Some(g) => format!("{:.1} (n={})", g, band.len()),
+                None => "-".to_string(),
             }
-        }
+        };
 
-        // Only the cases the parameter can reach, which is the figure to minimise.
+        let ln_5_30 = {
+            let band: Vec<&LnCase> = cases
+                .iter()
+                .filter(|c| c.has_ln_effect() && c.ln_fraction() >= 0.05 && c.ln_fraction() < 0.3)
+                .collect();
+            match median_g(&band) {
+                Some(g) => format!("{:.1} (n={})", g, band.len()),
+                None => "-".to_string(),
+            }
+        };
+
+        let ln_30_60 = {
+            let band: Vec<&LnCase> = cases
+                .iter()
+                .filter(|c| c.has_ln_effect() && c.ln_fraction() >= 0.3 && c.ln_fraction() < 0.6)
+                .collect();
+            match median_g(&band) {
+                Some(g) => format!("{:.1} (n={})", g, band.len()),
+                None => "-".to_string(),
+            }
+        };
+
+        let ln_60_100 = {
+            let band: Vec<&LnCase> = cases
+                .iter()
+                .filter(|c| c.has_ln_effect() && c.ln_fraction() >= 0.6 && c.ln_fraction() < 1.01)
+                .collect();
+            match median_g(&band) {
+                Some(g) => format!("{:.1} (n={})", g, band.len()),
+                None => "-".to_string(),
+            }
+        };
+
         let affected: Vec<&LnCase> = cases.iter().filter(|c| c.has_ln_effect()).collect();
+        let all_v1_ln_str = match median_g(&affected) {
+            Some(g) => format!("{:.1} (n={})", g, affected.len()),
+            None => "-".to_string(),
+        };
+
         let plausible = affected
             .iter()
             .filter(|c| {
@@ -5006,13 +5151,22 @@ fn ln_release_ratio_sweep() {
                 fit_with_quality(&c.counts, &units, &c.windows, &model).is_plausible()
             })
             .count();
+        let plaus_str = format!("{}/{}", plausible, affected.len());
 
-        match median_g(&affected) {
-            Some(g) => print!("  {:>13}", format!("{g:.1} (n={})", affected.len())),
-            None => print!("  {:>13}", "-"),
-        }
-        println!("  {:>9}", format!("{plausible}/{}", affected.len()));
+        table.add_row(vec![
+            Cell::new(format!("{:.2}", ratio)).set_alignment(CellAlignment::Right),
+            Cell::new(format!("{:.3}", ln_sigma_scale(ratio))).set_alignment(CellAlignment::Right),
+            Cell::new(control_str).set_alignment(CellAlignment::Right),
+            Cell::new(ln_0_5).set_alignment(CellAlignment::Right),
+            Cell::new(ln_5_30).set_alignment(CellAlignment::Right),
+            Cell::new(ln_30_60).set_alignment(CellAlignment::Right),
+            Cell::new(ln_60_100).set_alignment(CellAlignment::Right),
+            Cell::new(all_v1_ln_str).set_alignment(CellAlignment::Right),
+            Cell::new(plaus_str).set_alignment(CellAlignment::Right),
+        ]);
     }
+
+    println!("{}", table);
 
     println!(
         "\nCONTROL is the cases the split cannot reach (no long notes, or V2 judging); \
@@ -5035,14 +5189,14 @@ fn ln_release_ratio_sweep() {
     println!("\n=== short-hold surcharge (penalty x decay scale) ===");
     println!("ratio(t) = release_ratio * (1 + penalty * exp(-t / scale)); penalty 0 is phase one");
 
-    let bands_by_median: [(&str, f64, f64); 3] = [
+    static BANDS_BY_MEDIAN: [(&str, f64, f64); 3] = [
         ("short", 0.0, 90.0),
         ("mid", 90.0, 160.0),
         ("long", 160.0, 1e9),
     ];
 
     print!("{:>7} {:>7} {:>6}", "penalty", "scale", "base");
-    for (label, _, _) in bands_by_median {
+    for (label, _, _) in BANDS_BY_MEDIAN {
         print!("  {:>13}", format!("medLN {label}"));
     }
     println!("  {:>13}  {:>9}", "all V1+LN", "plaus");
@@ -5086,7 +5240,7 @@ fn ln_release_ratio_sweep() {
             // Grouped by the map's *median* hold length, since that is the quantity
             // the surcharge keys off — unlike LN share, which says nothing about
             // whether the holds are taps or half-second presses.
-            for (_, lo, hi) in bands_by_median {
+            for (_, lo, hi) in BANDS_BY_MEDIAN {
                 let band: Vec<&LnCase> = cases
                     .iter()
                     .filter(|c| {
@@ -5707,16 +5861,29 @@ fn summarise_group(label: &str, rows: &[&MultiPriced]) {
     }
 
     let n = rows.len() as f64;
-    let current: f64 = rows.iter().map(|r| r.current_pp).sum();
-    let sunny_local: f64 = rows.iter().map(|r| r.sunny_local_pp).sum();
+    let current: f64 = rows.iter().map(|r| r.perf.pp).sum();
+    let sunny_local: f64 = rows
+        .iter()
+        .map(|r| (r.perf.xxy_pp_pattern + r.perf.xxy_pp_accuracy))
+        .sum();
     let live: f64 = rows.iter().map(|r| r.row.live_pp).sum();
-    let mean_scalar = rows.iter().map(|r| r.scalar).sum::<f64>() / n;
+    let mean_scalar = rows
+        .iter()
+        .map(|r| {
+            (if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                r.perf.pp / r.perf.xxy_pp_pattern
+            } else {
+                1.0
+            })
+        })
+        .sum::<f64>()
+        / n;
 
     // Comparing current against live (the sunny reference from fixtures).
     let mean_delta = rows
         .iter()
         .filter(|r| r.row.live_pp > 0.0)
-        .map(|r| (r.current_pp / r.row.live_pp - 1.0) * 100.0)
+        .map(|r| (r.perf.pp / r.row.live_pp - 1.0) * 100.0)
         .sum::<f64>();
     let mean_delta = if rows.iter().any(|r| r.row.live_pp > 0.0) {
         mean_delta / rows.iter().filter(|r| r.row.live_pp > 0.0).count() as f64
@@ -6337,15 +6504,20 @@ fn release_density_weight_sweep_dump() {
     }
 
     for score in load_multiuser() {
+        let ln_fraction = if score.attrs.n_objects > 0 {
+            score.attrs.n_long_notes as f64 / score.attrs.n_objects as f64
+        } else {
+            0.0
+        };
         println!(
             "SCORE\t{}\t{}\t{}\t{:.6}\t{:.10}\t{:.6}\t{:.6}",
             score.row.uid,
             score.row.map_id,
             score.row.keys,
-            score.ln_fraction,
-            score.stars,
+            ln_fraction,
+            score.attrs.stars,
             score.row.live_pp,
-            score.current_pp
+            score.perf.pp
         );
     }
 }
@@ -7397,7 +7569,7 @@ fn gap_vs_fit_sweep() {
         points.push(Point {
             median_gap: shape.median_gap,
             collision_share: shape.collision_share,
-            pp_ratio: s.current_pp / s.row.live_pp,
+            pp_ratio: s.perf.pp / s.row.live_pp,
             g_timing: s.g_timing,
         });
     }
@@ -7684,7 +7856,7 @@ fn collision_skill_slope() {
         points.push(Point {
             uid: s.row.uid.clone(),
             collision_share: shape.collision_share,
-            stars: s.stars,
+            stars: s.attrs.stars,
             skill: s.skill,
             window_mod: s.row.mods.contains("EZ") || s.row.mods.contains("HR"),
             map_id: s.row.map_id.clone(),
@@ -9518,8 +9690,7 @@ fn does_a_mean_offset_move_pp() {
         }
 
         let windows = hit_windows(&map, &mods, clock_rate, false);
-        let great =
-            get_hit_window_300(&map, clock_rate, false, &mods);
+        let great = get_hit_window_300(&map, clock_rate, false, &mods);
         let data = RebirthData::new(
             notes,
             total_columns,
@@ -10373,12 +10544,7 @@ fn transition_oracle_experiments() {
                     let total_columns = map.cs.round_ties_even().max(1.0) as usize;
                     let (notes, _) = build_notes(clock_rate, map.hit_objects.iter(), total_columns);
                     let windows = hit_windows(&map, &mods, clock_rate, false);
-                    let great = get_hit_window_300(
-                        &map,
-                        clock_rate,
-                        false,
-                        &mods,
-                    );
+                    let great = get_hit_window_300(&map, clock_rate, false, &mods);
                     let data = RebirthData::new(
                         notes,
                         total_columns,

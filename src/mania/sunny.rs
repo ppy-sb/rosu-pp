@@ -697,6 +697,16 @@ pub struct SunnyManiaPerformanceAttributes {
     pub timing_reference_accuracy: f64,
     /// Score-conditioned timing spread used for the relative transfer, in milliseconds.
     pub timing_core_sigma: f64,
+    /// Debug: Map-based timing difficulty factor (from SR phase)
+    pub timing_map_factor: f64,
+    /// Debug: Score-based timing adjustment multiplier
+    pub timing_score_adjustment: f64,
+    /// Debug: Player's total loss from per-judgement analysis
+    pub timing_player_loss: f64,
+    /// Debug: Expected total loss from per-judgement analysis
+    pub timing_expected_loss: f64,
+    /// Debug: Loss difference (player - expected)
+    pub timing_loss_diff: f64,
 }
 
 /// Score state required for the performance calculation.
@@ -818,7 +828,7 @@ fn compute_map_timing_difficulty(
     // - 0.994 (NM baseline) → 1.0 factor
     // - 0.986 (HR) → 1.12 factor (+12%)
     const BASELINE_ACC: f64 = 0.994;
-    const ACC_SCALE: f64 = 15.0;  // 0.001 acc diff = 0.015 factor diff
+    const ACC_SCALE: f64 = 15.0; // 0.001 acc diff = 0.015 factor diff
 
     let window_factor = 1.0 + (BASELINE_ACC - expected_acc) * ACC_SCALE;
 
@@ -832,7 +842,9 @@ fn compute_map_timing_difficulty(
         let total_ln = attrs.n_long_notes as f64;
         if total_ln > 0.0 {
             // Check if LN durations are spread across buckets (反键-like)
-            let buckets_used = attrs.ln_duration_buckets.iter()
+            let buckets_used = attrs
+                .ln_duration_buckets
+                .iter()
                 .filter(|&&count| count > 0)
                 .count();
 
@@ -854,6 +866,111 @@ fn compute_map_timing_difficulty(
 
     // Clamp to reasonable range [0.85, 1.15]
     combined.clamp(0.85, 1.15)
+}
+
+/// Result of per-judgement timing adjustment calculation.
+#[derive(Clone, Copy, Debug)]
+struct TimingAdjustmentDebug {
+    /// Final multiplier applied
+    multiplier: f64,
+    /// Player's total loss (weighted sum)
+    player_loss: f64,
+    /// Expected total loss (weighted sum)
+    expected_loss: f64,
+    /// Loss difference (player - expected)
+    loss_diff: f64,
+}
+
+/// Compute score-based timing adjustment from per-judgement loss analysis.
+///
+/// Compares player's judgement distribution to expected baseline, applying
+/// asymmetric penalties for different judgement types.
+///
+/// Returns a multiplier in [0.85, 1.15] where:
+/// - Better distribution than expected → >1.0 (reward)
+/// - Worse distribution than expected → <1.0 (penalty)
+fn compute_per_judgement_timing_adjustment(
+    state: SunnyScoreState,
+    attrs: &SunnyManiaDifficultyAttributes,
+    units: &[JudgementUnit],
+    model: &ErrorModel,
+) -> TimingAdjustmentDebug {
+    let total_hits = state.total_hits() as f64;
+    if total_hits == 0.0 {
+        return TimingAdjustmentDebug {
+            multiplier: 1.0,
+            player_loss: 0.0,
+            expected_loss: 0.0,
+            loss_diff: 0.0,
+        };
+    }
+
+    // Get expected counts at baseline sigma (same as SR phase uses)
+    const BASELINE_SIGMA: f64 = 12.0;
+    let expected = expected_counts_at_core_sigma(units, &attrs.hit_windows, model, BASELINE_SIGMA);
+    let expected_arr = expected.as_array();
+
+    // Player actual counts
+    let player_counts = [
+        state.n320 as f64,
+        state.n300 as f64,
+        state.n200 as f64,
+        state.n100 as f64,
+        state.n50 as f64,
+        state.misses as f64,
+    ];
+
+    // Accuracy weights (305-based system)
+    const ACC_WEIGHTS: [f64; 6] = [
+        305.0 / 305.0, // 320: 1.0
+        300.0 / 305.0, // 300: 0.9836
+        200.0 / 305.0, // 200: 0.6557
+        100.0 / 305.0, // 100: 0.3279
+        50.0 / 305.0,  // 50:  0.1639
+        0.0 / 305.0,   // miss: 0.0
+    ];
+
+    // For first iteration: uniform penalty weights (should reproduce similar to total acc ratio)
+    // Later we'll introduce asymmetric matrix
+    const PENALTY_WEIGHTS: [f64; 6] = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+
+    // Calculate per-judgement loss contributions
+    let mut total_player_loss = 0.0;
+    let mut total_expected_loss = 0.0;
+
+    for i in 0..6 {
+        // Loss = how much this judgement pulls acc down from perfect (1.0)
+        let loss_per_hit = 1.0 - ACC_WEIGHTS[i];
+
+        let player_loss = (player_counts[i] / total_hits) * loss_per_hit;
+        let expected_loss = (expected_arr[i] / total_hits) * loss_per_hit;
+
+        // Weight the loss contributions
+        total_player_loss += player_loss * PENALTY_WEIGHTS[i];
+        total_expected_loss += expected_loss * PENALTY_WEIGHTS[i];
+    }
+
+    // Compare losses: less loss = better performance
+    // Calculate absolute difference in loss
+    let loss_diff = total_player_loss - total_expected_loss;
+
+    // Convert loss difference to multiplier:
+    // loss_diff < 0 (better than expected) → multiplier > 1.0
+    // loss_diff = 0 (as expected) → multiplier = 1.0
+    // loss_diff > 0 (worse than expected) → multiplier < 1.0
+    //
+    // Scale factor: 0.01 loss diff ≈ 5% multiplier change
+    // Example: diff = -0.02 (2% better) → +10% multiplier → 1.10
+    //          diff = +0.02 (2% worse) → -10% multiplier → 0.90
+    const SCALE: f64 = 5.0;
+    let multiplier = (1.0 - loss_diff * SCALE).clamp(0.85, 1.15);
+
+    TimingAdjustmentDebug {
+        multiplier,
+        player_loss: total_player_loss,
+        expected_loss: total_expected_loss,
+        loss_diff,
+    }
 }
 
 /// Calculate the sunny performance attributes.
@@ -922,6 +1039,11 @@ fn calculate_performance_inner(
                 variety_multiplier: xxy_variety_multiplier,
                 acc_multiplier: 1.0,
                 length_multiplier: xxy_length_multiplier,
+                timing_map_factor: 1.0,
+                timing_score_adjustment: 1.0,
+                timing_player_loss: 0.0,
+                timing_expected_loss: 0.0,
+                timing_loss_diff: 0.0,
             },
             mods,
         );
@@ -936,21 +1058,10 @@ fn calculate_performance_inner(
     // 1. Map-based factor (computed in SR, same for all scores on this map)
     let map_timing_factor = attrs.timing_difficulty_factor;
 
-    // 2. Score-based adjustment: compare player's acc to expected acc
-    // Expected acc is at 8.5ms sigma (average skilled player on this map structure)
-    // Player acc is their actual custom_accuracy (305-based, not 320-based)
-    let expected_acc = attrs.timing_expected_accuracy;
-
-    // Relative performance: how much better/worse than expected
-    // score_acc = 0.98, expected = 0.97 → ratio = 1.0103 → small bonus
-    // score_acc = 0.96, expected = 0.97 → ratio = 0.9897 → small penalty
-    let acc_ratio = score_accuracy / expected_acc;
-
-    // Convert to multiplier with dampening (don't want huge swings)
-    // Use square root to compress the effect:
-    // - 1.02 ratio → 1.01 multiplier (+1%)
-    // - 0.98 ratio → 0.99 multiplier (-1%)
-    let score_timing_adjustment = acc_ratio.sqrt().clamp(0.85, 1.15);
+    // 2. Score-based adjustment: per-judgement loss analysis
+    // Compare player's judgement distribution to expected baseline
+    let timing_debug = compute_per_judgement_timing_adjustment(state, attrs, &_units, model);
+    let score_timing_adjustment = timing_debug.multiplier;
 
     // Combine both factors
     let timing_multiplier = map_timing_factor * score_timing_adjustment;
@@ -970,11 +1081,18 @@ fn calculate_performance_inner(
 
         timing_expected_accuracy: attrs.timing_expected_accuracy,
         timing_reference_accuracy: attrs.timing_reference_accuracy,
-        timing_core_sigma: 12.0,  // Baseline used in map difficulty calculation
+        timing_core_sigma: 12.0, // Baseline used in map difficulty calculation
 
         variety_multiplier: xxy_variety_multiplier,
-        acc_multiplier: timing_multiplier,  // Combined: map factor × score adjustment
+        acc_multiplier: timing_multiplier, // Combined: map factor × score adjustment
         length_multiplier: xxy_length_multiplier,
+
+        // Debug fields
+        timing_map_factor: map_timing_factor,
+        timing_score_adjustment: score_timing_adjustment,
+        timing_player_loss: timing_debug.player_loss,
+        timing_expected_loss: timing_debug.expected_loss,
+        timing_loss_diff: timing_debug.loss_diff,
     };
 
     normalize_for_human_reference(v, mods)
