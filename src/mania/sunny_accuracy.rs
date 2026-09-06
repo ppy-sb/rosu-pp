@@ -663,12 +663,12 @@ impl ErrorModel {
     /// Sigma scale factor based on gap time to previous note.
     ///
     /// Returns a multiplier on the base sigma, following a Gaussian curve:
-    /// `sigma_multiplier = (baseline + amplitude * exp(-(gap - peak)^2 / (2 * width^2))) / 12.0`
+    /// `sigma_multiplier = (baseline + amplitude * exp(-(gap - peak)^2 / (2 * width^2))) / TIMING_BASELINE_SIGMA`
     ///
-    /// The division by 12.0 normalizes to the baseline sigma used in the model.
-    /// At sparse gaps (200ms+): factor ≈ 1.3 (wider than baseline)
-    /// At peak density (~114ms): factor ≈ 2.1 (much wider)
-    /// At very dense (<50ms): factor ≈ 1.6 (moderately wider)
+    /// The division by TIMING_BASELINE_SIGMA normalizes to the baseline sigma used in the model.
+    /// At sparse gaps (200ms+): factor ≈ 1.4 (wider than baseline)
+    /// At peak density (~114ms): factor ≈ 2.3 (much wider)
+    /// At very dense (<50ms): factor ≈ 1.8 (moderately wider)
     pub fn sigma_scale_from_gap(&self, gap_ms: f64) -> f64 {
         if self.sigma_baseline == 0.0 && self.sigma_peak_amplitude == 0.0 {
             return 1.0; // Disabled
@@ -676,15 +676,15 @@ impl ErrorModel {
 
         if !gap_ms.is_finite() {
             // No predecessor: use baseline
-            return self.sigma_baseline / 12.0;
+            return self.sigma_baseline / TIMING_BASELINE_SIGMA;
         }
 
         let deviation = gap_ms - self.sigma_peak_gap;
         let exponent = -(deviation * deviation) / (2.0 * self.sigma_width * self.sigma_width);
         let sigma = self.sigma_baseline + self.sigma_peak_amplitude * exponent.exp();
 
-        // Normalize to baseline sigma of 12ms
-        sigma / 12.0
+        // Normalize to baseline sigma
+        sigma / TIMING_BASELINE_SIGMA
     }
 
     /// The timing error standard deviation, in ms, for local difficulty

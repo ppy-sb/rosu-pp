@@ -2349,7 +2349,6 @@ fn fixture_stars() {
 #[test]
 #[ignore = "reads gitignored fixtures; prints a report rather than asserting"]
 fn ladder_report() {
-    use crate::mania::sunny_accuracy::skill_for_counts;
     use std::collections::BTreeMap;
     use std::io::BufRead as _;
 
@@ -2421,7 +2420,7 @@ fn ladder_report() {
             .or_default()
             .push(Row {
                 live_pp: fields[9].parse().unwrap_or(0.0),
-                skill: skill_for_counts(&counts, &units, &attrs.hit_windows, &model),
+                skill: 1.0,
                 g_timing: fit.g_timing,
                 plausible: fit.is_plausible(),
                 #[cfg(test)]

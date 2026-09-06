@@ -815,7 +815,7 @@ fn compute_map_timing_difficulty(
     attrs: &SunnyManiaDifficultyAttributes,
     timing: &TimingPpResult,
 ) -> f64 {
-    // Expected accuracy at baseline sigma (12ms) - lower means harder to acc
+    // Expected accuracy at baseline sigma (11ms) - lower means harder to acc
     let expected_acc = timing.expected_accuracy;
 
     // Window tightness factor
@@ -907,8 +907,8 @@ fn compute_per_judgement_timing_adjustment(
     }
 
     // Get expected counts at baseline sigma (same as SR phase uses)
-    const BASELINE_SIGMA: f64 = 12.0;
-    let expected = expected_counts_at_core_sigma(units, &attrs.hit_windows, model, BASELINE_SIGMA);
+    let expected =
+        expected_counts_at_core_sigma(units, &attrs.hit_windows, model, TIMING_BASELINE_SIGMA);
     let expected_arr = expected.as_array();
 
     // Player actual counts
@@ -1057,6 +1057,7 @@ fn calculate_performance_inner(
     let xxy_pp = xxy_pp_pattern + xxy_pp_accuracy;
 
     // Two-part timing adjustment:
+    // 1. Map-based adjustment (from SR phase)
     let map_timing_factor = attrs.timing_difficulty_factor;
 
     // 2. Score-based adjustment: per-judgement loss analysis
@@ -1082,7 +1083,7 @@ fn calculate_performance_inner(
 
         timing_expected_accuracy: attrs.timing_expected_accuracy,
         timing_reference_accuracy: attrs.timing_reference_accuracy,
-        timing_core_sigma: 12.0, // Baseline used in map difficulty calculation
+        timing_core_sigma: TIMING_BASELINE_SIGMA, // Baseline used in map difficulty calculation
 
         variety_multiplier: xxy_variety_multiplier,
         acc_multiplier: timing_multiplier, // Combined: map factor × score adjustment
