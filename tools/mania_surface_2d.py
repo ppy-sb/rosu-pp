@@ -109,6 +109,7 @@ def dump(args: argparse.Namespace) -> None:
     if args.map:
         env["SURFACE_MAP"] = str(args.map)
     env["SURFACE_CLOCK_RATE"] = str(args.clock_rate)
+    env["SURFACE_SIGMAS"] = ",".join(str(x) for x in SIGMA_TICKS)
     if args.fit_sigma is not None:
         env["SURFACE_CORE_SIGMA"] = str(args.fit_sigma)
     result = subprocess.run(command, cwd=ROOT, env=env, check=False)
@@ -196,7 +197,7 @@ def load_grid() -> tuple[np.ndarray, np.ndarray, list[float], list[float]]:
 
 
 DIFF_TICKS = [2, 3, 5, 8, 12, 20]
-SIGMA_TICKS = [5, 7, 10, 15, 20, 30]  # Timing spread in milliseconds
+SIGMA_TICKS = [2, 4, 6, 8, 10, 12, 16, 24, 32]  # Timing spread in milliseconds
 
 
 def panel_shortfall(figure, ax, acc, diffs, sigmas, X, Y) -> None:
@@ -224,8 +225,8 @@ def panel_shortfall(figure, ax, acc, diffs, sigmas, X, Y) -> None:
 
     ax.set_xscale("log")
     ax.set_yscale("log")
-    plain_log(ax, "x", DIFF_TICKS)
-    plain_log(ax, "y", SIGMA_TICKS)
+    plain_log(ax, "x", diffs)
+    plain_log(ax, "y", sigmas)
 
     ax.plot(diffs, diffs, color="#ffffff", ls="--", lw=1.0, alpha=0.5, label="sigma = difficulty")
     ax.set_ylim(min(sigmas), max(sigmas))
@@ -256,7 +257,7 @@ def panel_bands(ax, difficulty: float, fit_sigma: float | None) -> None:
     ax.set_xscale("log")
     ax.set_xlim(sigmas.min(), sigmas.max())
     ax.set_ylim(0, 1)
-    plain_log(ax, "x", SIGMA_TICKS)
+    plain_log(ax, "x", sigmas)
 
     if fit_sigma:
         ax.axvline(fit_sigma, color="#ffffff", ls="--", lw=1.0, alpha=0.6)
@@ -275,6 +276,9 @@ def panel_windows(ax, target: float | None) -> None:
         series[label][0].append(float(row["sigma"]))
         series[label][1].append(float(row["accuracy"]))
 
+    # Get actual sigma range from data
+    all_sigmas = sorted({s for xs, _ in series.values() for s in xs})
+
     style(
         ax,
         "same difficulty, different windows\n(the horizontal gap is window_scalar)",
@@ -292,15 +296,15 @@ def panel_windows(ax, target: float | None) -> None:
         )
 
     ax.set_xscale("log")
-    ax.set_xlim(5, 30)
+    ax.set_xlim(min(all_sigmas), max(all_sigmas))
     ax.set_ylim(0.4, 1.005)
-    plain_log(ax, "x", [5, 7, 10, 15, 20, 30])
+    plain_log(ax, "x", all_sigmas)
     legend(ax, loc="lower left")
 
     # A horizontal read at one accuracy is exactly what `window_scalar` computes.
     if target:
         ax.axhline(target, color="#ffd166", ls="--", lw=1.0, alpha=0.7)
-        ax.annotate(f"{target * 100:.2f}%", (5.5, target + 0.008), color="#ffd166", fontsize=8)
+        ax.annotate(f"{target * 100:.2f}%", (min(all_sigmas) * 1.1, target + 0.008), color="#ffd166", fontsize=8)
 
 
 def panel_input_state(ax) -> None:
@@ -463,8 +467,8 @@ def panel_misses(figure, ax, miss, diffs, sigmas, X, Y) -> None:
 
     ax.set_xscale("log")
     ax.set_yscale("log")
-    plain_log(ax, "x", DIFF_TICKS)
-    plain_log(ax, "y", SIGMA_TICKS)
+    plain_log(ax, "x", diffs)
+    plain_log(ax, "y", sigmas)
     ax.plot(diffs, diffs, color="#ffffff", ls="--", lw=1.0, alpha=0.5)
     ax.set_ylim(min(sigmas), max(sigmas))
     colorbar(figure, filled, ax, "log10 miss rate")

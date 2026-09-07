@@ -2601,22 +2601,26 @@ fn surface_dump() {
     };
 
     let difficulties = geom(2.0, 20.0, 121);
-    let skills = geom(0.5, 60.0, 161);
 
-    // In the new timing-based system, we vary core_sigma instead of skill
-    // Map skill range to sigma range for visualization
-    let sigmas: Vec<f64> = skills
-        .iter()
-        .map(|&s| {
-            // Map skill range [0.5, 60] to sigma range [30, 5] (inverse relationship)
-            // Higher skill -> lower sigma (tighter timing)
-            let log_skill = s.ln();
-            let log_min = 0.5_f64.ln();
-            let log_max = 60.0_f64.ln();
-            let t = (log_skill - log_min) / (log_max - log_min);
-            30.0 * (5.0_f64 / 30.0).powf(t.clamp(0.0, 1.0))
-        })
-        .collect();
+    // Sigma values can be overridden via SURFACE_SIGMAS env var (comma-separated)
+    let sigmas: Vec<f64> = env("SURFACE_SIGMAS")
+        .map(|s| s.split(',').filter_map(|v| v.trim().parse().ok()).collect())
+        .unwrap_or_else(|| {
+            // Default: map skill range to sigma range for backward compatibility
+            let skills = geom(0.5, 60.0, 161);
+            skills
+                .iter()
+                .map(|&s| {
+                    // Map skill range [0.5, 60] to sigma range [30, 5] (inverse relationship)
+                    // Higher skill -> lower sigma (tighter timing)
+                    let log_skill = s.ln();
+                    let log_min = 0.5_f64.ln();
+                    let log_max = 60.0_f64.ln();
+                    let t = (log_skill - log_min) / (log_max - log_min);
+                    30.0 * (5.0_f64 / 30.0).powf(t.clamp(0.0, 1.0))
+                })
+                .collect()
+        });
 
     let mut grid = String::from("difficulty,sigma,accuracy,miss_rate\n");
 
@@ -2859,7 +2863,7 @@ fn surface_dump() {
         "wrote {} (grid {} x {}, slice {:.3} stars from {})",
         dir.display(),
         difficulties.len(),
-        skills.len(),
+        sigmas.len(),
         map_difficulty,
         source,
     );
