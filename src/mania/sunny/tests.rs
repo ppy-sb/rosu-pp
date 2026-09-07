@@ -4360,7 +4360,6 @@ fn multiuser_report() {
             "cur/rebirth%",
             "map_f",
             "score_a",
-            "score_u",
             "loss_d",
         ]);
 
