@@ -2564,7 +2564,7 @@ fn ladder_report() {
 fn surface_dump() {
     use crate::mania::sunny_accuracy::{
         TIMING_BASELINE_SIGMA, expected_counts_at_core_sigma, ln_sigma_scale_for_duration,
-        sigma_scale_from_difficulty, sigma_scale_from_difficulty_ratio,
+        sigma_scale_from_difficulty_ratio,
     };
     use crate::mania::sunny_windows::ManiaJudgement;
     use std::fmt::Write as _;

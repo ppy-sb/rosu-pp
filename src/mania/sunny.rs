@@ -1584,7 +1584,6 @@ fn units_from_difficulty_bins(
 struct TimingPpResult {
     expected_accuracy: f64,
     reference_accuracy: f64,
-    core_sigma: f64,
 }
 
 fn compute_timing_pp_with_units(
@@ -1597,7 +1596,6 @@ fn compute_timing_pp_with_units(
         return TimingPpResult {
             expected_accuracy: 1.0,
             reference_accuracy: 1.0,
-            core_sigma: attrs.base_timing_sigma,
             ..TimingPpResult::default()
         };
     }
@@ -1642,7 +1640,6 @@ fn compute_timing_pp_with_units(
     TimingPpResult {
         expected_accuracy,
         reference_accuracy,
-        core_sigma: attrs.base_timing_sigma,
     }
 }
 
