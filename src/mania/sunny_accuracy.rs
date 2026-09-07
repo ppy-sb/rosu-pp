@@ -260,20 +260,19 @@ const DEFAULT_SKILL_EXPONENT: f64 = 1.7;
 #[cfg(test)]
 const DEFAULT_DIFFICULTY_FLOOR: f64 = 0.6;
 
-// The fixed-spread path keeps `core_sigma` as the spread of a representative
-// six-star note. These are the same floor and exponent as the former
-// `sigma(d, skill)` curve; only the skill-dependent coefficient has moved to
-// `core_sigma`.
-const TIMING_DIFFICULTY_REFERENCE: f64 = 6.0;
-const TIMING_DIFFICULTY_FLOOR: f64 = 0.6;
-const TIMING_DIFFICULTY_EXPONENT: f64 = 1.7;
+// Per-note difficulty scaling: how much a note's local difficulty affects its sigma.
+// Applied within a map to create variation between easy and hard notes.
+// Uses ratio comparison: ((local_d + floor) / (reference_d + floor))^exponent
+const PER_NOTE_DIFFICULTY_REFERENCE_UNTUNED: f64 = 6.0;
+const PER_NOTE_DIFFICULTY_FLOOR: f64 = 0.5;
+const PER_NOTE_DIFFICULTY_EXPONENT: f64 = 2.0;
 
-// SR-level base sigma scaling: separate from per-note difficulty scaling.
-// Reference SR where base_timing_sigma = TIMING_BASELINE_SIGMA (no scaling).
-// 8.0 represents "neutral" map difficulty where 11ms baseline is appropriate.
-const SR_REFERENCE: f64 = 8.0;
-const SR_SCALING_FLOOR: f64 = 0.6;
-const SR_SCALING_EXPONENT: f64 = 1.7;
+// Map-level SR scaling: converts star rating to base_timing_sigma multiplier.
+// Applied once per map to set the overall expected timing precision.
+// At MAP_SR_REFERENCE, base_timing_sigma = TIMING_BASELINE_SIGMA (no scaling).
+// Uses logarithmic scaling for symmetric, gradual changes across SR range.
+const MAP_SR_REFERENCE: f64 = 10.0;
+const MAP_SR_SCALING_FACTOR: f64 = 0.15; // Controls how much sigma changes per SR difference
 const DEFAULT_LAPSE_WEIGHT: f64 = 0.0296;
 const DEFAULT_LAPSE_RATIO: f64 = 3.339;
 const DEFAULT_SHORT_HOLD_SCALE: f64 = 120.0;
@@ -1279,9 +1278,9 @@ pub fn ln_sigma_scale_for_duration(model: &ErrorModel, duration: f64) -> f64 {
 /// absolute power) preserves the old difficulty relationship without making
 /// `core_sigma` map-dependent.
 pub fn sigma_scale_from_difficulty_ratio(difficulty: f64, reference: f64) -> f64 {
-    let numerator = difficulty.max(0.0) + TIMING_DIFFICULTY_FLOOR;
-    let denominator = reference.max(0.0) + TIMING_DIFFICULTY_FLOOR;
-    let scale = (numerator / denominator).powf(TIMING_DIFFICULTY_EXPONENT);
+    let numerator = difficulty.max(0.0) + PER_NOTE_DIFFICULTY_FLOOR;
+    let denominator = reference.max(0.0) + PER_NOTE_DIFFICULTY_FLOOR;
+    let scale = (numerator / denominator).powf(PER_NOTE_DIFFICULTY_EXPONENT);
 
     if scale.is_finite() && scale > 0.0 {
         scale
@@ -1290,13 +1289,14 @@ pub fn sigma_scale_from_difficulty_ratio(difficulty: f64, reference: f64) -> f64
     }
 }
 
-/// Relative timing spread using six stars as the reference gauge.
+/// Relative timing spread using the untuned per-note difficulty reference (6.0).
 ///
-/// This is useful for standalone units and diagnostics. Production map builders use
-/// [`sigma_scale_from_difficulty_ratio`] with the map's weighted mean local difficulty
-/// so raw `d_all` values do not shift an entire map away from the player's core spread.
+/// Used by standalone unit constructors (uniform fallback, LN duration split) when
+/// per-note difficulty bins aren't available. Production per-note difficulty paths
+/// use [`sigma_scale_from_difficulty_ratio`] with the map's weighted mean local
+/// difficulty as reference instead.
 pub fn sigma_scale_from_difficulty(difficulty: f64) -> f64 {
-    sigma_scale_from_difficulty_ratio(difficulty, TIMING_DIFFICULTY_REFERENCE)
+    sigma_scale_from_difficulty_ratio(difficulty, PER_NOTE_DIFFICULTY_REFERENCE_UNTUNED)
 }
 
 /// Map-level sigma scaling from SR.
@@ -1305,18 +1305,26 @@ pub fn sigma_scale_from_difficulty(difficulty: f64) -> f64 {
 /// representing how the player's baseline timing precision changes with overall
 /// map difficulty. Applied once per map, not per operation.
 ///
-/// Uses SR_REFERENCE (8.0) as the neutral point where no scaling is applied.
-/// Below 8★, expects tighter timing; above 8★, expects looser timing.
+/// Uses logarithmic scaling centered at MAP_SR_REFERENCE (10.0):
+/// - At 10★: no scaling (1.0×)
+/// - Above 10★: expects tighter timing (gradually decreasing sigma)
+/// - Below 10★: expects looser timing (gradually increasing sigma)
+///
+/// Logarithmic formula provides symmetric scaling that doesn't explode at extremes.
+/// The power law made it exponentially harder to tighten sigma as SR increased.
 pub fn sr_to_base_sigma_scale(sr: f64) -> f64 {
-    let numerator = sr.max(0.0) + SR_SCALING_FLOOR;
-    let denominator = SR_REFERENCE + SR_SCALING_FLOOR;
-    let scale = (numerator / denominator).powf(SR_SCALING_EXPONENT);
+    let sr = sr.max(0.1); // Prevent log(0)
 
-    if scale.is_finite() && scale > 0.0 {
-        scale
-    } else {
-        1.0
-    }
+    // Logarithmic scaling: log(SR / MAP_SR_REFERENCE)
+    // MAP_SR_SCALING_FACTOR controls how much sigma changes per SR difference
+    let ratio = sr / MAP_SR_REFERENCE;
+    let log_ratio = ratio.ln();
+
+    // Invert: higher SR → lower scale (tighter timing)
+    let scale = 1.0 - (log_ratio * MAP_SR_SCALING_FACTOR);
+
+    // Clamp to reasonable range [0.7, 1.3]
+    scale.clamp(0.7, 1.3)
 }
 
 impl JudgementUnit {
@@ -2071,13 +2079,13 @@ mod tests {
     #[test]
     fn difficulty_changes_fixed_sigma_spread_with_the_old_power_law() {
         let easy = JudgementUnit::new(2.0).sigma_scale;
-        let reference = JudgementUnit::new(TIMING_DIFFICULTY_REFERENCE).sigma_scale;
+        let reference = JudgementUnit::new(PER_NOTE_DIFFICULTY_REFERENCE_UNTUNED).sigma_scale;
         let hard = JudgementUnit::new(10.0).sigma_scale;
 
         assert!(easy < reference && reference < hard);
 
-        let expected_ratio = ((10.0 + TIMING_DIFFICULTY_FLOOR) / (2.0 + TIMING_DIFFICULTY_FLOOR))
-            .powf(TIMING_DIFFICULTY_EXPONENT);
+        let expected_ratio = ((10.0 + PER_NOTE_DIFFICULTY_FLOOR) / (2.0 + PER_NOTE_DIFFICULTY_FLOOR))
+            .powf(PER_NOTE_DIFFICULTY_EXPONENT);
         assert!((hard / easy - expected_ratio).abs() < 1e-12);
         assert!((reference - 1.0).abs() < 1e-12);
     }
