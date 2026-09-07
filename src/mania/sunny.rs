@@ -23,8 +23,8 @@ use rosu_mods::{Acronym, GameMods};
 
 use crate::mania::sunny_accuracy::{
     ErrorModel, JudgementUnit, LN_DURATION_BUCKETS, TIMING_BASELINE_SIGMA,
-    expected_counts_at_core_sigma, ln_sigma_scale_for_duration,
-    sigma_scale_from_difficulty_ratio, sr_to_base_sigma_scale,
+    expected_counts_at_core_sigma, ln_sigma_scale_for_duration, sigma_scale_from_difficulty_ratio,
+    sr_to_base_sigma_scale,
 };
 use crate::mania::sunny_windows::{ManiaHitWindows, hit_windows};
 
@@ -1083,17 +1083,14 @@ fn calculate_performance_inner(
     let timing_multiplier = (score_timing_adjustment + map_timing_factor) - 1.0;
 
     // Apply timing multiplier on top of Sunny's accuracy system
-    let pp_with_timing = xxy_pp * timing_multiplier;
-
-    // Use timing-based PP as the main result
-    let pp = pp_with_timing;
+    let pp = xxy_pp * timing_multiplier;
 
     let v = SunnyManiaPerformanceAttributes {
         pp,
         pp_difficulty: attrs.stars,
         xxy_pp_pattern,
         xxy_pp_accuracy,
-        pp_timing: pp_with_timing - xxy_pp,
+        pp_timing: pp - xxy_pp,
 
         timing_expected_accuracy: attrs.timing_expected_accuracy,
         timing_reference_accuracy: attrs.timing_reference_accuracy,
@@ -1472,10 +1469,9 @@ fn units_from_input_state_bins(
             );
             unit.fading_mean_offset = class_offset;
             // Pure state-dependent sigma scaling (no SR dependency)
-            unit.sigma_scale = sigma_scale_from_difficulty_ratio(
-                bin.mean_difficulty,
-                reference_difficulty,
-            ) * model.sigma_scale_from_gap(bin.mean_gap_ms);
+            unit.sigma_scale =
+                sigma_scale_from_difficulty_ratio(bin.mean_difficulty, reference_difficulty)
+                    * model.sigma_scale_from_gap(bin.mean_gap_ms);
             units.push(unit);
         }
 
@@ -1488,11 +1484,10 @@ fn units_from_input_state_bins(
             );
             unit.fading_mean_offset = class_offset;
             // Pure state-dependent sigma scaling (no SR dependency)
-            unit.sigma_scale = sigma_scale_from_difficulty_ratio(
-                bin.mean_difficulty,
-                reference_difficulty,
-            ) * ln_sigma_scale_for_duration(model, bin.mean_duration_ms)
-                * model.sigma_scale_from_gap(bin.mean_gap_ms);
+            unit.sigma_scale =
+                sigma_scale_from_difficulty_ratio(bin.mean_difficulty, reference_difficulty)
+                    * ln_sigma_scale_for_duration(model, bin.mean_duration_ms)
+                    * model.sigma_scale_from_gap(bin.mean_gap_ms);
             units.push(unit);
         }
     }
@@ -1568,19 +1563,14 @@ fn units_from_difficulty_bins(
             units.push(
                 JudgementUnit::long_note(bin.difficulty, weight, model, bin.mean_duration)
                     .with_sigma_scale(
-                        sigma_scale_from_difficulty_ratio(
-                            bin.difficulty,
-                            reference_difficulty,
-                        ) * ln_sigma_scale_for_duration(model, bin.mean_duration),
+                        sigma_scale_from_difficulty_ratio(bin.difficulty, reference_difficulty)
+                            * ln_sigma_scale_for_duration(model, bin.mean_duration),
                     ),
             );
         } else {
             units.push(
                 JudgementUnit::repeated(bin.difficulty, weight).with_sigma_scale(
-                    sigma_scale_from_difficulty_ratio(
-                        bin.difficulty,
-                        reference_difficulty,
-                    ),
+                    sigma_scale_from_difficulty_ratio(bin.difficulty, reference_difficulty),
                 ),
             );
         }

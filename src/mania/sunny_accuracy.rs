@@ -267,6 +267,13 @@ const DEFAULT_DIFFICULTY_FLOOR: f64 = 0.6;
 const TIMING_DIFFICULTY_REFERENCE: f64 = 6.0;
 const TIMING_DIFFICULTY_FLOOR: f64 = 0.6;
 const TIMING_DIFFICULTY_EXPONENT: f64 = 1.7;
+
+// SR-level base sigma scaling: separate from per-note difficulty scaling.
+// Reference SR where base_timing_sigma = TIMING_BASELINE_SIGMA (no scaling).
+// 8.0 represents "neutral" map difficulty where 11ms baseline is appropriate.
+const SR_REFERENCE: f64 = 8.0;
+const SR_SCALING_FLOOR: f64 = 0.6;
+const SR_SCALING_EXPONENT: f64 = 1.7;
 const DEFAULT_LAPSE_WEIGHT: f64 = 0.0296;
 const DEFAULT_LAPSE_RATIO: f64 = 3.339;
 const DEFAULT_SHORT_HOLD_SCALE: f64 = 120.0;
@@ -1298,10 +1305,18 @@ pub fn sigma_scale_from_difficulty(difficulty: f64) -> f64 {
 /// representing how the player's baseline timing precision changes with overall
 /// map difficulty. Applied once per map, not per operation.
 ///
-/// Uses the same power-law structure as sigma_scale_from_difficulty_ratio but
-/// operates on SR rather than local difficulty values.
+/// Uses SR_REFERENCE (8.0) as the neutral point where no scaling is applied.
+/// Below 8★, expects tighter timing; above 8★, expects looser timing.
 pub fn sr_to_base_sigma_scale(sr: f64) -> f64 {
-    sigma_scale_from_difficulty_ratio(sr, TIMING_DIFFICULTY_REFERENCE)
+    let numerator = sr.max(0.0) + SR_SCALING_FLOOR;
+    let denominator = SR_REFERENCE + SR_SCALING_FLOOR;
+    let scale = (numerator / denominator).powf(SR_SCALING_EXPONENT);
+
+    if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    }
 }
 
 impl JudgementUnit {
