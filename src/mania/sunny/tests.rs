@@ -2557,13 +2557,14 @@ fn ladder_report() {
 /// `SURFACE_CORE_SIGMA` selects the core timing spread used for the per-note
 /// expected-count overlay (default: [`TIMING_BASELINE_SIGMA`]).
 ///
-/// Run with `cargo test surface_dump -- --ignored --nocapture`.
+/// Run with `cargo test --release --lib mania::sunny::tests::surface_dump --
+/// --ignored --nocapture --exact`.
 #[test]
 #[ignore = "writes CSV for plotting rather than asserting"]
 fn surface_dump() {
     use crate::mania::sunny_accuracy::{
         TIMING_BASELINE_SIGMA, expected_counts_at_core_sigma, ln_sigma_scale_for_duration,
-        sigma_scale_from_difficulty,
+        sigma_scale_from_difficulty, sigma_scale_from_difficulty_ratio,
     };
     use crate::mania::sunny_windows::ManiaJudgement;
     use std::fmt::Write as _;
@@ -2717,24 +2718,27 @@ fn surface_dump() {
                             duration.map_or_else(
                                 || {
                                     JudgementUnit::new(*difficulty).with_sigma_scale(
-                                        sigma_scale_from_difficulty(
-                                            *difficulty / reference_difficulty * map_difficulty,
+                                        sigma_scale_from_difficulty_ratio(
+                                            *difficulty,
+                                            reference_difficulty,
                                         ),
                                     )
                                 },
                                 |duration| {
                                     JudgementUnit::long_note(*difficulty, 1.0, &model, duration)
                                         .with_sigma_scale(
-                                            sigma_scale_from_difficulty(
-                                                *difficulty / reference_difficulty * map_difficulty,
+                                            sigma_scale_from_difficulty_ratio(
+                                                *difficulty,
+                                                reference_difficulty,
                                             ) * ln_sigma_scale_for_duration(&model, duration),
                                         )
                                 },
                             )
                         } else {
                             JudgementUnit::new(*difficulty).with_sigma_scale(
-                                sigma_scale_from_difficulty(
-                                    *difficulty / reference_difficulty * map_difficulty,
+                                sigma_scale_from_difficulty_ratio(
+                                    *difficulty,
+                                    reference_difficulty,
                                 ),
                             )
                         };

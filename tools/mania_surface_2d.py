@@ -93,6 +93,8 @@ def dump(args: argparse.Namespace) -> None:
     command = [
         "cargo",
         "test",
+        "--release",
+        "--lib",
         "mania::sunny::tests::surface_dump",
         "--",
         "--ignored",
