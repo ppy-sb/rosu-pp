@@ -1101,7 +1101,7 @@ fn calculate_performance_inner(
 }
 
 pub(crate) fn normalize_for_human_reference(
-    input: SunnyManiaPerformanceAttributes,
+    mut input: SunnyManiaPerformanceAttributes,
     mods: &GameMods,
 ) -> SunnyManiaPerformanceAttributes {
     // NF still gets a flat factor: failing is a scoring matter that the timing
@@ -1114,15 +1114,13 @@ pub(crate) fn normalize_for_human_reference(
         multiplier *= 0.75;
     }
 
-    let mut normalized = input;
+    input.pp *= multiplier;
+    input.xxy_pp_pattern *= multiplier;
+    input.xxy_pp_accuracy *= multiplier;
+    input.pp_timing *= multiplier;
+    input.pp_difficulty *= multiplier;
 
-    normalized.pp *= multiplier;
-    normalized.xxy_pp_pattern *= multiplier;
-    normalized.xxy_pp_accuracy *= multiplier;
-    normalized.pp_timing *= multiplier;
-    normalized.pp_difficulty *= multiplier;
-
-    normalized
+    input
 }
 
 /// OD 8 classic non-convert, the modal mania OD.
