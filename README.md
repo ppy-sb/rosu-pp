@@ -2,6 +2,28 @@
 
 # rosu-pp
 
+multi user report
+```bash
+SUNNY_MULTIUSER_TSV=local-fixtures/bp-21207706.tsv \
+SUNNY_MAPS=local-fixtures/bp-21207706/maps \
+cargo test --release --lib multiuser_report -- \
+  --ignored --nocapture --exact mania::sunny::tests::multiuser_report
+
+Both variables are optional:
+
+- SUNNY_MULTIUSER_TSV defaults to local-fixtures/multiuser.tsv
+- SUNNY_MAPS defaults to local-fixtures/maps
+
+Verified successfully against the 100-score BP fixture. Changes are in src/mania/sunny/tests.rs.
+```
+
+surface diff preview
+```bash
+.venv/bin/python tools/mania_surface_2d.py \
+    --map local-fixtures/maps/3616430.osu \
+    --out /tmp/surface_2d_3616430.png
+```
+
 <!-- cargo-rdme start -->
 
 Library to calculate difficulty and performance attributes for all [osu!] gamemodes.

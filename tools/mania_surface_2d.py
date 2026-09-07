@@ -173,31 +173,31 @@ def colorbar(figure, mappable, ax, label: str) -> None:
 def load_grid() -> tuple[np.ndarray, np.ndarray, list[float], list[float]]:
     rows = read("grid.csv")
     diffs = sorted({float(r["difficulty"]) for r in rows})
-    skills = sorted({float(r["skill"]) for r in rows})
+    sigmas = sorted({float(r["sigma"]) for r in rows}, reverse=True)  # Reverse so lower sigma (better) is higher
     di = {v: i for i, v in enumerate(diffs)}
-    si = {v: i for i, v in enumerate(skills)}
+    si = {v: i for i, v in enumerate(sigmas)}
 
-    acc = np.zeros((len(skills), len(diffs)))
+    acc = np.zeros((len(sigmas), len(diffs)))
     miss = np.zeros_like(acc)
 
     for row in rows:
-        y, x = si[float(row["skill"])], di[float(row["difficulty"])]
+        y, x = si[float(row["sigma"])], di[float(row["difficulty"])]
         acc[y, x] = float(row["accuracy"])
         miss[y, x] = float(row["miss_rate"])
 
-    return acc, miss, diffs, skills
+    return acc, miss, diffs, sigmas
 
 
 DIFF_TICKS = [2, 3, 5, 8, 12, 20]
-SKILL_TICKS = [0.5, 1, 2, 5, 10, 20, 40]
+SIGMA_TICKS = [5, 7, 10, 15, 20, 30]  # Timing spread in milliseconds
 
 
-def panel_shortfall(figure, ax, acc, diffs, skills, X, Y) -> None:
+def panel_shortfall(figure, ax, acc, diffs, sigmas, X, Y) -> None:
     style(
         ax,
-        "accuracy shortfall (1 - acc) over (difficulty, skill)\n" "at reference windows (OD8 classic)",
+        "accuracy shortfall (1 - acc) over (difficulty, sigma)\n" "at reference windows (OD8 classic)",
         "map difficulty (stars)",
-        "player skill (star units)",
+        "timing spread sigma (ms)",
     )
 
     # Accuracy itself is flat over most of the plane; the shortfall on a log scale is
@@ -218,38 +218,28 @@ def panel_shortfall(figure, ax, acc, diffs, skills, X, Y) -> None:
     ax.set_xscale("log")
     ax.set_yscale("log")
     plain_log(ax, "x", DIFF_TICKS)
-    plain_log(ax, "y", SKILL_TICKS)
+    plain_log(ax, "y", SIGMA_TICKS)
 
-    ax.plot(diffs, diffs, color="#ffffff", ls="--", lw=1.0, alpha=0.5, label="skill = difficulty")
-    ax.plot(
-        diffs,
-        [3.7 * d for d in diffs],
-        color="#ff9f6b",
-        ls=":",
-        lw=1.2,
-        alpha=0.85,
-        label="saturation (3.7x)",
-    )
-    ax.set_ylim(min(skills), max(skills))
+    ax.plot(diffs, diffs, color="#ffffff", ls="--", lw=1.0, alpha=0.5, label="sigma = difficulty")
+    ax.set_ylim(min(sigmas), max(sigmas))
     legend(ax, loc="lower right")
     colorbar(figure, filled, ax, "log10 (1 - accuracy)")
 
 
-def panel_bands(ax, difficulty: float, fit_skill: float | None) -> None:
+def panel_bands(ax, difficulty: float, fit_sigma: float | None) -> None:
     rows = read("bands.csv")
-    skills = np.array([float(r["skill"]) for r in rows])
-    sigma = np.array([float(r["sigma"]) for r in rows])
+    sigmas = np.array([float(r["sigma"]) for r in rows])
     shares = {col: np.array([float(r[col]) for r in rows]) for col, *_ in BANDS}
 
     style(
         ax,
-        f"judgement composition vs skill at {difficulty:.2f} stars\n"
+        f"judgement composition vs timing spread at {difficulty:.2f} stars\n"
         "(the mechanism the surface integrates)",
-        "player skill (star units)",
+        "timing spread sigma (ms)",
         "share of judgements",
     )
     ax.stackplot(
-        skills,
+        sigmas,
         [shares[col] for col, *_ in BANDS],
         labels=[label for _, label, _ in BANDS],
         colors=[color for *_, color in BANDS],
@@ -257,24 +247,14 @@ def panel_bands(ax, difficulty: float, fit_skill: float | None) -> None:
     )
 
     ax.set_xscale("log")
-    ax.set_xlim(skills.min(), skills.max())
+    ax.set_xlim(sigmas.min(), sigmas.max())
     ax.set_ylim(0, 1)
-    plain_log(ax, "x", SKILL_TICKS)
+    plain_log(ax, "x", SIGMA_TICKS)
 
-    if fit_skill:
-        ax.axvline(fit_skill, color="#ffffff", ls="--", lw=1.0, alpha=0.6)
+    if fit_sigma:
+        ax.axvline(fit_sigma, color="#ffffff", ls="--", lw=1.0, alpha=0.6)
 
     legend(ax, loc="center left", ncol=2)
-
-    # sigma is what actually varies; the bands are just it read through the windows.
-    twin = ax.twinx()
-    twin.plot(skills, sigma, color="#ffffff", lw=1.2, alpha=0.45)
-    twin.set_yscale("log")
-    twin.set_ylabel("implied sigma (ms)", color=TICK, fontsize=9)
-    twin.tick_params(colors="#6f7686", labelsize=8)
-
-    for spine in twin.spines.values():
-        spine.set_color(EDGE)
 
 
 def panel_windows(ax, target: float | None) -> None:
@@ -285,13 +265,13 @@ def panel_windows(ax, target: float | None) -> None:
     for row in rows:
         label = row["label"]
         greats[label] = float(row["great"])
-        series[label][0].append(float(row["skill"]))
+        series[label][0].append(float(row["sigma"]))
         series[label][1].append(float(row["accuracy"]))
 
     style(
         ax,
         "same difficulty, different windows\n(the horizontal gap is window_scalar)",
-        "player skill (star units)",
+        "timing spread sigma (ms)",
         "305-weighted accuracy",
     )
 
@@ -305,15 +285,15 @@ def panel_windows(ax, target: float | None) -> None:
         )
 
     ax.set_xscale("log")
-    ax.set_xlim(1, 60)
+    ax.set_xlim(5, 30)
     ax.set_ylim(0.4, 1.005)
-    plain_log(ax, "x", [1, 2, 5, 10, 20, 40])
-    legend(ax, loc="lower right")
+    plain_log(ax, "x", [5, 7, 10, 15, 20, 30])
+    legend(ax, loc="lower left")
 
     # A horizontal read at one accuracy is exactly what `window_scalar` computes.
     if target:
         ax.axhline(target, color="#ffd166", ls="--", lw=1.0, alpha=0.7)
-        ax.annotate(f"{target * 100:.2f}%", (1.15, target + 0.008), color="#ffd166", fontsize=8)
+        ax.annotate(f"{target * 100:.2f}%", (5.5, target + 0.008), color="#ffd166", fontsize=8)
 
 
 def panel_input_state(ax) -> None:
@@ -459,12 +439,12 @@ def panel_probability_balance(ax) -> None:
     legend(ax, loc="upper center", bbox_to_anchor=(0.5, -0.34), ncol=6, borderaxespad=0.0)
 
 
-def panel_misses(figure, ax, miss, diffs, skills, X, Y) -> None:
+def panel_misses(figure, ax, miss, diffs, sigmas, X, Y) -> None:
     style(
         ax,
-        "miss rate over (difficulty, skill)\n" "misses come from the timing tail, not a separate term",
+        "miss rate over (difficulty, sigma)\n" "misses come from the timing tail, not a separate term",
         "map difficulty (stars)",
-        "player skill (star units)",
+        "timing spread sigma (ms)",
     )
 
     rate = np.clip(miss, 1e-6, 1.0)
@@ -477,9 +457,9 @@ def panel_misses(figure, ax, miss, diffs, skills, X, Y) -> None:
     ax.set_xscale("log")
     ax.set_yscale("log")
     plain_log(ax, "x", DIFF_TICKS)
-    plain_log(ax, "y", SKILL_TICKS)
+    plain_log(ax, "y", SIGMA_TICKS)
     ax.plot(diffs, diffs, color="#ffffff", ls="--", lw=1.0, alpha=0.5)
-    ax.set_ylim(min(skills), max(skills))
+    ax.set_ylim(min(sigmas), max(sigmas))
     colorbar(figure, filled, ax, "log10 miss rate")
 
 
@@ -504,7 +484,7 @@ def main() -> None:
         "--clock-rate", type=float, default=1.0, help="clock rate used to rate the map (default 1.0)"
     )
     parser.add_argument(
-        "--fit-skill", type=float, default=None, help="mark this skill on the composition panel"
+        "--fit-sigma", type=float, default=None, help="mark this timing spread on the composition panel"
     )
     parser.add_argument(
         "--target-accuracy", type=float, default=None, help="mark this accuracy on the windows panel"
@@ -530,15 +510,15 @@ def main() -> None:
             difficulty = float(meta["difficulty"])
             source = Path(meta["source"]).stem
 
-    acc, miss, diffs, skills = load_grid()
-    X, Y = np.meshgrid(diffs, skills)
+    acc, miss, diffs, sigmas = load_grid()
+    X, Y = np.meshgrid(diffs, sigmas)
 
     # For LN-focused inspection, keep the two panels with the most actionable
     # information: judgement composition and the response to alternate windows.
     figure = plt.figure(figsize=(16, 14), facecolor=PAPER)
     grid = figure.add_gridspec(2, 2, height_ratios=[1.15, 1.72], hspace=0.34, wspace=0.20)
 
-    panel_bands(figure.add_subplot(grid[0, 0]), difficulty, args.fit_skill)
+    panel_bands(figure.add_subplot(grid[0, 0]), difficulty, args.fit_sigma)
     panel_windows(figure.add_subplot(grid[0, 1]), args.target_accuracy)
     instrument = grid[1, :].subgridspec(2, 1, height_ratios=[2.1, 1.0], hspace=0.0)
     composition_ax = figure.add_subplot(instrument[0, 0])

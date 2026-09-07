@@ -2558,7 +2558,7 @@ fn ladder_report() {
 #[test]
 #[ignore = "writes CSV for plotting rather than asserting"]
 fn surface_dump() {
-    use crate::mania::sunny_accuracy::expected_counts;
+    use crate::mania::sunny_accuracy::{expected_counts_at_core_sigma, TIMING_BASELINE_SIGMA};
     use crate::mania::sunny_windows::ManiaJudgement;
     use std::fmt::Write as _;
 
@@ -2596,15 +2596,27 @@ fn surface_dump() {
     let difficulties = geom(2.0, 20.0, 121);
     let skills = geom(0.5, 60.0, 161);
 
-    let mut grid = String::from("difficulty,skill,accuracy,miss_rate\n");
+    // In the new timing-based system, we vary core_sigma instead of skill
+    // Map skill range to sigma range for visualization
+    let sigmas: Vec<f64> = skills.iter().map(|&s| {
+        // Map skill range [0.5, 60] to sigma range [30, 5] (inverse relationship)
+        // Higher skill -> lower sigma (tighter timing)
+        let log_skill = s.ln();
+        let log_min = 0.5_f64.ln();
+        let log_max = 60.0_f64.ln();
+        let t = (log_skill - log_min) / (log_max - log_min);
+        30.0 * (5.0_f64 / 30.0).powf(t.clamp(0.0, 1.0))
+    }).collect();
+
+    let mut grid = String::from("difficulty,sigma,accuracy,miss_rate\n");
 
     for &difficulty in &difficulties {
-        for &skill in &skills {
+        for &sigma in &sigmas {
             let units = [JudgementUnit::new(difficulty)];
-            let expected = expected_counts(&units, &REFERENCE_WINDOWS, &model, skill);
+            let expected = expected_counts_at_core_sigma(&units, &REFERENCE_WINDOWS, &model, sigma);
             writeln!(
                 grid,
-                "{difficulty},{skill},{},{}",
+                "{difficulty},{sigma},{},{}",
                 expected.custom_accuracy(),
                 expected.get(ManiaJudgement::Miss) / expected.total()
             )
@@ -2677,25 +2689,39 @@ fn surface_dump() {
 
             if let Some((_, _, attrs)) = map_slice.as_ref() {
                 let model = ErrorModel::default();
-                let skill = attrs.stars.max(0.001);
+                let core_sigma = TIMING_BASELINE_SIGMA;
+
+                // Helper to compute sigma_scale from difficulty
+                // Maps difficulty variation to timing spread variation
+                // Reference difficulty chosen so map average gets scale ≈ 1.0
+                const DIFFICULTY_FLOOR: f64 = 0.6;
+                const SKILL_EXPONENT: f64 = 1.7;
+                let reference_difficulty = difficulty; // Use map difficulty as reference
+
                 let mut csv = String::from(
                     "time_ms,note_index,variant,difficulty,miss,p50,p100,p200,p300,p320,custom_accuracy,acc_d\n",
                 );
-                for (idx, ((difficulty, duration), object)) in
+                for (idx, ((note_difficulty, duration), object)) in
                     per_note.iter().zip(&map.hit_objects).enumerate()
                 {
                     for variant in ["baseline", "ln_as_rice"] {
-                        let unit = if variant == "baseline" {
+                        let mut unit = if variant == "baseline" {
                             duration.map_or_else(
-                                || JudgementUnit::new(*difficulty),
+                                || JudgementUnit::new(*note_difficulty),
                                 |duration| {
-                                    JudgementUnit::long_note(*difficulty, 1.0, &model, duration)
+                                    JudgementUnit::long_note(*note_difficulty, 1.0, &model, duration)
                                 },
                             )
                         } else {
-                            JudgementUnit::new(*difficulty)
+                            JudgementUnit::new(*note_difficulty)
                         };
-                        let counts = expected_counts(&[unit], &attrs.hit_windows, &model, skill);
+
+                        // Scale timing spread based on note difficulty relative to map average
+                        let sigma_scale = ((note_difficulty + DIFFICULTY_FLOOR) / (reference_difficulty + DIFFICULTY_FLOOR))
+                            .powf(SKILL_EXPONENT);
+                        unit = unit.with_sigma_scale(unit.sigma_scale * sigma_scale);
+
+                        let counts = expected_counts_at_core_sigma(&[unit], &attrs.hit_windows, &model, core_sigma);
                         let p = counts.as_array();
                         let accuracy = counts.custom_accuracy();
                         let acc_d = difficulty * (1.0 - accuracy);
@@ -2706,12 +2732,12 @@ fn surface_dump() {
                             idx,
                             variant,
                             difficulty,
-                            p[5],
-                            p[4],
-                            p[3],
-                            p[2],
-                            p[1],
-                            p[0],
+                            p[5], // miss
+                            p[4], // p50
+                            p[3], // p100
+                            p[2], // p200
+                            p[1], // p300
+                            p[0], // p320
                             accuracy,
                             acc_d
                         )
@@ -2723,20 +2749,21 @@ fn surface_dump() {
         }
     }
 
-    let mut bands = String::from("skill,sigma,n320,n300,n200,n100,n50,miss,accuracy\n");
+    // In the new timing-based system, we vary core_sigma instead of skill
+    let mut bands = String::from("sigma,n320,n300,n200,n100,n50,miss,accuracy\n");
 
-    for &skill in &skills {
+    for &sigma in &sigmas {
         let windows = map_slice
             .as_ref()
             .map_or(REFERENCE_WINDOWS, |(_, _, attrs)| attrs.hit_windows);
-        let expected = expected_counts(&units, &windows, &model, skill);
+        let expected = expected_counts_at_core_sigma(&units, &windows, &model, sigma);
         let total = expected.total();
         let share = |judgement| expected.get(judgement) / total;
 
         writeln!(
             bands,
-            "{skill},{},{},{},{},{},{},{},{}",
-            model.sigma(difficulty, skill),
+            "{},{},{},{},{},{},{},{}",
+            sigma,
             share(ManiaJudgement::Perfect),
             share(ManiaJudgement::Great),
             share(ManiaJudgement::Good),
@@ -2775,7 +2802,7 @@ fn surface_dump() {
         ]
     };
 
-    let mut windows_csv = String::from("label,great,skill,accuracy\n");
+    let mut windows_csv = String::from("label,great,sigma,accuracy\n");
 
     for (label, great) in window_sets {
         let windows = if label == "natural" {
@@ -2793,9 +2820,9 @@ fn surface_dump() {
             }
         };
 
-        for &skill in &skills {
-            let accuracy = expected_counts(&units, &windows, &model, skill).custom_accuracy();
-            writeln!(windows_csv, "{label},{great},{skill},{accuracy}").unwrap();
+        for &sigma in &sigmas {
+            let accuracy = expected_counts_at_core_sigma(&units, &windows, &model, sigma).custom_accuracy();
+            writeln!(windows_csv, "{label},{great},{sigma},{accuracy}").unwrap();
         }
     }
 
@@ -3905,12 +3932,21 @@ fn model_ab_report() {
     }
 }
 
-/// Reads `local-fixtures/multiuser.tsv` and prices every row twice.
+/// Reads the configured multiuser/BP TSV and prices every row twice.
+///
+/// `SUNNY_MULTIUSER_TSV` selects the TSV (default: `local-fixtures/multiuser.tsv`).
+/// `SUNNY_MAPS` selects the directory containing `{map_id}.osu` files (default:
+/// `local-fixtures/maps`).
 fn load_multiuser() -> Vec<MultiPriced> {
     use rayon::prelude::*;
     use std::collections::{HashMap, HashSet};
 
-    let Ok(text) = std::fs::read_to_string("local-fixtures/multiuser.tsv") else {
+    let tsv = std::env::var_os("SUNNY_MULTIUSER_TSV")
+        .unwrap_or_else(|| "local-fixtures/multiuser.tsv".into());
+    let maps_dir = std::env::var_os("SUNNY_MAPS")
+        .unwrap_or_else(|| "local-fixtures/maps".into());
+
+    let Ok(text) = std::fs::read_to_string(tsv) else {
         return Vec::new();
     };
 
@@ -3948,7 +3984,7 @@ fn load_multiuser() -> Vec<MultiPriced> {
     let attrs_by_job: HashMap<_, _> = jobs
         .into_par_iter()
         .filter_map(|(map_id, mod_names)| {
-            let map = parse(&format!("local-fixtures/maps/{map_id}.osu"))?;
+            let map = parse(&format!("{}/{}.osu", maps_dir.to_string_lossy(), map_id))?;
             let (mods, clock_rate) = mods_for(&mod_names);
 
             // These are ppy.sb scores, i.e. stable. The V2 bit selects whether an LN
@@ -4244,8 +4280,10 @@ fn load_ladder(path: &str) -> Vec<MultiPriced> {
 /// surface alone, with the live column left in as a cross-check on how far the
 /// two sunny versions have otherwise moved.
 ///
-/// `cargo test --release multiuser_report -- --ignored --nocapture --exact
-/// sunny::tests::multiuser_report`
+/// `cargo test --release --lib multiuser_report -- --ignored --nocapture --exact
+/// mania::sunny::tests::multiuser_report`
+///
+/// Set `SUNNY_MULTIUSER_TSV` and `SUNNY_MAPS` to report on another BP fixture.
 #[test]
 #[ignore = "reads gitignored fixtures; prints a report rather than asserting"]
 fn multiuser_report() {
@@ -4255,7 +4293,9 @@ fn multiuser_report() {
 
     let scores = load_multiuser();
     if scores.is_empty() {
-        println!("no fixtures present (local-fixtures/multiuser.tsv); nothing to report");
+        let tsv = std::env::var("SUNNY_MULTIUSER_TSV")
+            .unwrap_or_else(|_| "local-fixtures/multiuser.tsv".to_owned());
+        println!("no fixtures present ({tsv}); nothing to report");
         return;
     }
 
