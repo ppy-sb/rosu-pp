@@ -3,11 +3,11 @@
 #[test]
 fn test_fixed_timing_modifier() {
     // Using the EZDT example
-    let xxy_pp_pattern = 2453.7;  // Accuracy-neutral base (DT-inflated)
+    let xxy_pp_pattern = 2453.7; // Accuracy-neutral base (DT-inflated)
     let xxy_pp_accuracy = -1423.1; // Sunny's accuracy penalty for 85.7%
     let sunny_total = xxy_pp_pattern + xxy_pp_accuracy; // = 1030.6
 
-    let timing_multiplier = 0.7;  // Our timing penalty for loose timing
+    let timing_multiplier = 0.7; // Our timing penalty for loose timing
 
     // OLD (BROKEN) approach: multiply pattern only
     let old_total = xxy_pp_pattern * timing_multiplier;
@@ -26,7 +26,10 @@ fn test_fixed_timing_modifier() {
     println!();
     println!("NEW approach ((pattern + accuracy) × timing):");
     println!("  Result: {:.1} pp", new_total);
-    println!("  Outcome: {:.1} < {:.1} (correctly penalized!)", new_total, sunny_total);
+    println!(
+        "  Outcome: {:.1} < {:.1} (correctly penalized!)",
+        new_total, sunny_total
+    );
     println!();
     println!("✓ EZDT scores will now DROP as expected!");
 }

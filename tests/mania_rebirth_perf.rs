@@ -278,9 +278,7 @@ fn cold_start_pp() {
 
 #[test]
 fn reused_pp_repeated() {
-    eprintln!(
-        "\n=== [REUSED] performance x{REUSED_REPS} on the same map (after 1 warmup) ==="
-    );
+    eprintln!("\n=== [REUSED] performance x{REUSED_REPS} on the same map (after 1 warmup) ===");
 
     for mode in [Mode::Osu, Mode::Taiko, Mode::Catch, Mode::Mania] {
         let map = Beatmap::from_path(mode.path()).unwrap();

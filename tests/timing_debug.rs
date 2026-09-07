@@ -1,6 +1,5 @@
 use rosu_pp::mania::sunny::{SunnyManiaDifficultyAttributes, SunnyScoreState};
-use rosu_pp::mania::sunny_accuracy::{TIMING_BASELINE_SIGMA, timing_sigma_for_counts, ErrorModel};
-use rosu_mods::GameMods;
+use rosu_pp::mania::sunny_accuracy::{ErrorModel, TIMING_BASELINE_SIGMA, timing_sigma_for_counts};
 
 #[test]
 fn debug_timing_modifier() {
@@ -33,7 +32,14 @@ fn debug_timing_modifier() {
     // Fit sigma from these counts
     let model = ErrorModel::default();
     let total = state.total_hits();
-    let counts = [state.n320, state.n300, state.n200, state.n100, state.n50, state.misses];
+    let counts = [
+        state.n320,
+        state.n300,
+        state.n200,
+        state.n100,
+        state.n50,
+        state.misses,
+    ];
 
     // Create a simple unit for testing
     let units = vec![rosu_pp::mania::sunny_accuracy::JudgementUnit::repeated(
@@ -47,14 +53,23 @@ fn debug_timing_modifier() {
     let timing_multiplier = timing_ratio.powf(0.5).clamp(0.7, 1.3);
 
     println!("=== EZDT Score Debug ===");
-    println!("Accuracy: {:.2}%",
-        100.0 * (state.n320 + state.n300) as f64 / total as f64);
+    println!(
+        "Accuracy: {:.2}%",
+        100.0 * (state.n320 + state.n300) as f64 / total as f64
+    );
     println!("Fitted sigma: {:.3}ms", fitted_sigma);
     println!("Baseline sigma: {:.3}ms", TIMING_BASELINE_SIGMA);
     println!("Timing ratio (baseline/fitted): {:.4}", timing_ratio);
     println!("Timing multiplier (ratio^0.5): {:.4}", timing_multiplier);
     println!("Expected: ratio < 1.0 (loose timing) → multiplier < 1.0 (penalty)");
-    println!("Actual: {}", if timing_multiplier < 1.0 { "PENALTY ✓" } else { "REWARD ✗" });
+    println!(
+        "Actual: {}",
+        if timing_multiplier < 1.0 {
+            "PENALTY ✓"
+        } else {
+            "REWARD ✗"
+        }
+    );
 }
 
 #[test]
@@ -84,7 +99,14 @@ fn debug_timing_modifier_tight() {
 
     let model = ErrorModel::default();
     let total = state.total_hits();
-    let counts = [state.n320, state.n300, state.n200, state.n100, state.n50, state.misses];
+    let counts = [
+        state.n320,
+        state.n300,
+        state.n200,
+        state.n100,
+        state.n50,
+        state.misses,
+    ];
 
     let units = vec![rosu_pp::mania::sunny_accuracy::JudgementUnit::repeated(
         attrs.stars,
@@ -97,12 +119,21 @@ fn debug_timing_modifier_tight() {
     let timing_multiplier = timing_ratio.powf(0.5).clamp(0.7, 1.3);
 
     println!("\n=== High Accuracy Score Debug ===");
-    println!("Accuracy: {:.2}%",
-        100.0 * (state.n320 + state.n300) as f64 / total as f64);
+    println!(
+        "Accuracy: {:.2}%",
+        100.0 * (state.n320 + state.n300) as f64 / total as f64
+    );
     println!("Fitted sigma: {:.3}ms", fitted_sigma);
     println!("Baseline sigma: {:.3}ms", TIMING_BASELINE_SIGMA);
     println!("Timing ratio (baseline/fitted): {:.4}", timing_ratio);
     println!("Timing multiplier (ratio^0.5): {:.4}", timing_multiplier);
     println!("Expected: ratio > 1.0 (tight timing) → multiplier > 1.0 (reward)");
-    println!("Actual: {}", if timing_multiplier > 1.0 { "REWARD ✓" } else { "PENALTY ✗" });
+    println!(
+        "Actual: {}",
+        if timing_multiplier > 1.0 {
+            "REWARD ✓"
+        } else {
+            "PENALTY ✗"
+        }
+    );
 }

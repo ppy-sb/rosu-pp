@@ -4,7 +4,11 @@ use rosu_map::section::general::GameMode;
 use skills::{aim::Aim, flashlight::Flashlight, speed::Speed, strain::OsuStrainSkill};
 
 use crate::{
-    any::{CalculateError, difficulty::{skills::StrainSkill, Difficulty}},
+    Beatmap,
+    any::{
+        CalculateError,
+        difficulty::{Difficulty, skills::StrainSkill},
+    },
     model::{beatmap::BeatmapAttributes, mode::ConvertError, mods::GameMods},
     osurelax::{
         convert::convert_objects,
@@ -12,7 +16,6 @@ use crate::{
         object::OsuRelaxObject,
         performance::PERFORMANCE_BASE_MULTIPLIER,
     },
-    Beatmap,
 };
 
 use self::skills::OsuRelaxSkills;
@@ -136,7 +139,11 @@ impl DifficultyValues {
     }
 
     /// Process the difficulty values and store the results in `attrs`.
-    pub fn eval(attrs: &mut OsuRelaxDifficultyAttributes, mods: &GameMods, skills: &OsuRelaxSkills) {
+    pub fn eval(
+        attrs: &mut OsuRelaxDifficultyAttributes,
+        mods: &GameMods,
+        skills: &OsuRelaxSkills,
+    ) {
         let OsuRelaxSkills {
             aim,
             relax,

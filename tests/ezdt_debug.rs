@@ -1,4 +1,6 @@
-use rosu_pp::mania::sunny_accuracy::{TIMING_BASELINE_SIGMA, timing_sigma_for_counts, ErrorModel, JudgementUnit};
+use rosu_pp::mania::sunny_accuracy::{
+    ErrorModel, JudgementUnit, TIMING_BASELINE_SIGMA, timing_sigma_for_counts,
+};
 use rosu_pp::mania::sunny_windows::ManiaHitWindows;
 
 #[test]
@@ -8,12 +10,12 @@ fn debug_ezdt_windows() {
     // So OD 9 with EZ has much wider windows
 
     let ezdt_windows = ManiaHitWindows {
-        perfect: 16.5 * 1.4,  // ~23.1ms
-        great: 40.5 * 1.4,    // ~56.7ms
-        good: 73.5 * 1.4,     // ~102.9ms
-        ok: 103.5 * 1.4,      // ~144.9ms
-        meh: 127.5 * 1.4,     // ~178.5ms
-        miss: 164.5 * 1.4,    // ~230.3ms
+        perfect: 16.5 * 1.4, // ~23.1ms
+        great: 40.5 * 1.4,   // ~56.7ms
+        good: 73.5 * 1.4,    // ~102.9ms
+        ok: 103.5 * 1.4,     // ~144.9ms
+        meh: 127.5 * 1.4,    // ~178.5ms
+        miss: 164.5 * 1.4,   // ~230.3ms
     };
 
     let normal_windows = ManiaHitWindows {
@@ -34,9 +36,15 @@ fn debug_ezdt_windows() {
 
     println!("\n=== EZDT Windows Analysis ===");
     println!("Normal windows (OD 9):");
-    println!("  perfect: {:.1}ms, great: {:.1}ms", normal_windows.perfect, normal_windows.great);
+    println!(
+        "  perfect: {:.1}ms, great: {:.1}ms",
+        normal_windows.perfect, normal_windows.great
+    );
     println!("EZDT windows (OD 9 + EZ):");
-    println!("  perfect: {:.1}ms, great: {:.1}ms", ezdt_windows.perfect, ezdt_windows.great);
+    println!(
+        "  perfect: {:.1}ms, great: {:.1}ms",
+        ezdt_windows.perfect, ezdt_windows.great
+    );
 
     let sigma_normal = timing_sigma_for_counts(&state_counts, &units, &normal_windows, &model);
     let sigma_ezdt = timing_sigma_for_counts(&state_counts, &units, &ezdt_windows, &model);
@@ -52,7 +60,10 @@ fn debug_ezdt_windows() {
     let mult_ezdt = ratio_ezdt.powf(0.5).clamp(0.7, 1.3);
 
     println!("\nWith normal windows:");
-    println!("  ratio: {:.4}, multiplier: {:.4}", ratio_normal, mult_normal);
+    println!(
+        "  ratio: {:.4}, multiplier: {:.4}",
+        ratio_normal, mult_normal
+    );
     println!("With EZDT windows:");
     println!("  ratio: {:.4}, multiplier: {:.4}", ratio_ezdt, mult_ezdt);
 

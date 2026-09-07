@@ -1,12 +1,12 @@
 use std::cmp;
 
 use crate::{
+    GameMods,
     any::difficulty::{
         object::{HasStartTime, IDifficultyObject},
         skills::strain_decay,
     },
     osurelax::{difficulty::object::OsuRelaxDifficultyObject, object::OsuRelaxObjectKind},
-    GameMods,
 };
 
 define_skill! {

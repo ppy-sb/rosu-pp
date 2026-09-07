@@ -24,7 +24,6 @@ use rosu_mods::{Acronym, GameMods};
 use crate::mania::sunny_accuracy::{
     ErrorModel, JudgementUnit, LN_DURATION_BUCKETS, TIMING_BASELINE_SIGMA,
     expected_counts_at_core_sigma, ln_sigma_scale_for_duration, sigma_scale_from_difficulty,
-    timing_sigma_for_counts,
 };
 use crate::mania::sunny_windows::{ManiaHitWindows, hit_windows};
 
@@ -813,7 +812,7 @@ pub fn calculate(
 /// - Hard to acc (high OD, complex LN) → ~1.05-1.15
 /// - Typical maps → ~1.0
 fn compute_map_timing_difficulty(
-    attrs: &SunnyManiaDifficultyAttributes,
+    _attrs: &SunnyManiaDifficultyAttributes,
     timing: &TimingPpResult,
 ) -> f64 {
     // Expected accuracy at baseline sigma (11ms) - lower means harder to acc
@@ -993,7 +992,7 @@ fn calculate_performance_inner(
     mods: &GameMods,
     state: SunnyScoreState,
     model: &ErrorModel,
-    cached_timing: Option<TimingPpResult>,
+    _cached_timing: Option<TimingPpResult>,
 ) -> SunnyManiaPerformanceAttributes {
     let score_accuracy = xxy_custom_accuracy(state);
 
@@ -1403,7 +1402,9 @@ fn units_from_input_state_bins(
 
     let reference_difficulty = bins
         .iter()
-        .filter(|bin| bin.count > 0 && !(attrs.ln_judged_as_one && bin.class == InputClass::Release))
+        .filter(|bin| {
+            bin.count > 0 && !(attrs.ln_judged_as_one && bin.class == InputClass::Release)
+        })
         .map(|bin| bin.mean_difficulty * f64::from(bin.count))
         .sum::<f64>()
         / f64::from(binned);
@@ -1532,13 +1533,12 @@ fn units_from_difficulty_bins(
 
     for bin in bins {
         if bin.rice > 0 {
-            units.push(JudgementUnit::repeated(
-                bin.difficulty,
-                f64::from(bin.rice) * per_note,
-            )
-            .with_sigma_scale(sigma_scale_from_difficulty(
-                bin.difficulty / reference_difficulty * attrs.stars,
-            )));
+            units.push(
+                JudgementUnit::repeated(bin.difficulty, f64::from(bin.rice) * per_note)
+                    .with_sigma_scale(sigma_scale_from_difficulty(
+                        bin.difficulty / reference_difficulty * attrs.stars,
+                    )),
+            );
         }
 
         if bin.long == 0 {
@@ -1548,17 +1548,14 @@ fn units_from_difficulty_bins(
         let weight = f64::from(bin.long) * per_note;
 
         if combined_long_notes && bin.mean_duration > 0.0 {
-            units.push(JudgementUnit::long_note(
-                bin.difficulty,
-                weight,
-                model,
-                bin.mean_duration,
-            )
-            .with_sigma_scale(
-                sigma_scale_from_difficulty(
-                    bin.difficulty / reference_difficulty * attrs.stars,
-                ) * ln_sigma_scale_for_duration(model, bin.mean_duration),
-            ));
+            units.push(
+                JudgementUnit::long_note(bin.difficulty, weight, model, bin.mean_duration)
+                    .with_sigma_scale(
+                        sigma_scale_from_difficulty(
+                            bin.difficulty / reference_difficulty * attrs.stars,
+                        ) * ln_sigma_scale_for_duration(model, bin.mean_duration),
+                    ),
+            );
         } else {
             units.push(
                 JudgementUnit::repeated(bin.difficulty, weight).with_sigma_scale(
@@ -1579,85 +1576,6 @@ struct TimingPpResult {
     expected_accuracy: f64,
     reference_accuracy: f64,
     core_sigma: f64,
-}
-
-/// Evaluate timing PP by fitting the player's actual timing sigma from their score,
-/// then comparing it to a reference baseline sigma.
-///
-/// This approach:
-/// 1. Fits the player's timing spread (sigma) in milliseconds from their judgement counts
-/// 2. Compares their sigma to a baseline (TIMING_BASELINE_SIGMA)
-/// 3. Converts the sigma ratio to a PP adjustment through the performance proportion curve
-///
-/// Lower sigma (tighter timing) = better than baseline = positive PP adjustment
-/// Higher sigma (looser timing) = worse than baseline = negative PP adjustment
-fn compute_timing_pp(
-    attrs: &SunnyManiaDifficultyAttributes,
-    state: SunnyScoreState,
-    model: &ErrorModel,
-) -> TimingPpResult {
-    let total = state.total_hits();
-
-    if total == 0 || attrs.n_objects == 0 || attrs.stars <= 0.0 {
-        return TimingPpResult {
-            expected_accuracy: 1.0,
-            reference_accuracy: 1.0,
-            core_sigma: TIMING_BASELINE_SIGMA,
-            ..TimingPpResult::default()
-        };
-    }
-
-    let units = judgement_units(
-        attrs,
-        f64::from(total),
-        model,
-        !per_note_difficulty_disabled(),
-    );
-    let counts = [
-        state.n320,
-        state.n300,
-        state.n200,
-        state.n100,
-        state.n50,
-        state.misses,
-    ];
-
-    // Fit the player's actual timing sigma from their score
-    let fitted_sigma = timing_sigma_for_counts(&counts, &units, &attrs.hit_windows, model);
-
-    // Compute what accuracy the baseline sigma would produce
-    let baseline_expected =
-        expected_counts_at_core_sigma(&units, &attrs.hit_windows, model, TIMING_BASELINE_SIGMA);
-    let expected_accuracy = baseline_expected.custom_accuracy();
-
-    // Note: The fitted sigma should produce accuracy close to the actual score accuracy,
-    // which validates that the fitting process worked correctly.
-
-    // Reference: baseline through neutral conditions
-    let reference_model = ErrorModel {
-        recovery_offset: 0.0,
-        anticipation_offset: 0.0,
-        ..*model
-    };
-    let reference_units = judgement_units(
-        attrs,
-        f64::from(total),
-        &reference_model,
-        !per_note_difficulty_disabled(),
-    );
-    let reference = expected_counts_at_core_sigma(
-        &reference_units,
-        &attrs.hit_windows,
-        &reference_model,
-        TIMING_BASELINE_SIGMA,
-    );
-    let reference_accuracy = reference.custom_accuracy();
-
-    TimingPpResult {
-        expected_accuracy,
-        reference_accuracy,
-        core_sigma: fitted_sigma,
-    }
 }
 
 fn compute_timing_pp_with_units(
@@ -1710,7 +1628,7 @@ fn compute_timing_pp_with_units(
         TIMING_BASELINE_SIGMA,
     );
     let reference_accuracy = reference.custom_accuracy();
-    let reference_loss = (1.0 - reference_accuracy).max(f64::EPSILON);
+    // let reference_loss = (1.0 - reference_accuracy).max(f64::EPSILON);
 
     TimingPpResult {
         expected_accuracy,
@@ -1847,12 +1765,10 @@ struct RebirthData {
 }
 
 impl RebirthData {
-    fn new(
-        mut notes: Vec<Note>,
-        total_columns: usize,
-        hit_leniency: f64,
-        good_window: f64,
-    ) -> Self {
+    // The production path uses `new_with_windows`; this constructor exists for
+    // the historical/unit-test helpers that still build the legacy data shape.
+    #[cfg(test)]
+    fn new(notes: Vec<Note>, total_columns: usize, hit_leniency: f64, good_window: f64) -> Self {
         let mut hit_windows = ManiaHitWindows::default();
         hit_windows.great = hit_leniency;
         hit_windows.good = good_window;

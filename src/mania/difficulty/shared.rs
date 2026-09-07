@@ -108,7 +108,13 @@ pub(crate) fn query_cumsum(q: f64, x: &[f64], cumulative: &[f64], f: &[f64]) -> 
 }
 
 /// Smooth piecewise-constant function `f` on grid `x` using a sliding window.
-pub(crate) fn smooth_on_corners(x: &[f64], f: &[f64], window: f64, scale: f64, average: bool) -> Vec<f64> {
+pub(crate) fn smooth_on_corners(
+    x: &[f64],
+    f: &[f64],
+    window: f64,
+    scale: f64,
+    average: bool,
+) -> Vec<f64> {
     let Some((&first, &last)) = x.first().zip(x.last()) else {
         return Vec::new();
     };
@@ -184,12 +190,20 @@ pub(crate) fn step_interp(new_x: &[f64], old_x: &[f64], old_vals: &[f64]) -> Vec
 }
 
 /// Check if `active_columns[idx]` contains the given column.
-pub(crate) fn active_columns_contains(active_columns: &[Vec<usize>], idx: usize, column: isize) -> bool {
+pub(crate) fn active_columns_contains(
+    active_columns: &[Vec<usize>],
+    idx: usize,
+    column: isize,
+) -> bool {
     usize::try_from(column).is_ok_and(|column| active_columns[idx].contains(&column))
 }
 
 /// Get all notes in a column pair (for cross-column pattern detection).
-pub(crate) fn notes_in_pair(notes_by_column: &[Vec<Note>], total_columns: usize, pair_column: usize) -> Vec<Note> {
+pub(crate) fn notes_in_pair(
+    notes_by_column: &[Vec<Note>],
+    total_columns: usize,
+    pair_column: usize,
+) -> Vec<Note> {
     match pair_column {
         0 => notes_by_column.first().cloned().unwrap_or_default(),
         column if column == total_columns => {

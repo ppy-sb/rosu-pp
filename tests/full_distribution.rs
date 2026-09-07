@@ -24,8 +24,10 @@ fn test_full_distribution_approach() {
     let wmiss = -0.2;
 
     println!("\n=== Full Distribution Approach ===");
-    println!("Weights: 320={}, 300={}, 200={}, 100={}, 50={}, miss={}",
-             w320, w300, w200, w100, w50, wmiss);
+    println!(
+        "Weights: 320={}, 300={}, 200={}, 100={}, 50={}, miss={}",
+        w320, w300, w200, w100, w50, wmiss
+    );
     println!();
 
     for (label, counts) in test_cases {
@@ -39,20 +41,21 @@ fn test_full_distribution_approach() {
         let r50 = counts[4] as f64 / total as f64;
         let rmiss = counts[5] as f64 / total as f64;
 
-        let quality_score = (
-            r320 * w320 +
-            r300 * w300 +
-            r200 * w200 +
-            r100 * w100 +
-            r50 * w50 +
-            rmiss * wmiss
-        );
+        let quality_score =
+            r320 * w320 + r300 * w300 + r200 * w200 + r100 * w100 + r50 * w50 + rmiss * wmiss;
 
         let timing_multiplier = (0.55 + quality_score * 0.6).clamp(0.7, 1.15);
 
-        println!("{:25} acc={:5.1}%, quality={:.3}, mult={:.3}  [{:.0}/{:.0}/{:.0}]",
-                 label, acc, quality_score, timing_multiplier,
-                 r320*100.0, r300*100.0, r200*100.0);
+        println!(
+            "{:25} acc={:5.1}%, quality={:.3}, mult={:.3}  [{:.0}/{:.0}/{:.0}]",
+            label,
+            acc,
+            quality_score,
+            timing_multiplier,
+            r320 * 100.0,
+            r300 * 100.0,
+            r200 * 100.0
+        );
     }
 
     println!();

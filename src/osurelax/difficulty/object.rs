@@ -7,7 +7,7 @@ use crate::{
     osurelax::object::{OsuRelaxObject, OsuRelaxObjectKind, OsuSlider},
 };
 
-use super::{scaling_factor::ScalingFactor, HD_FADE_OUT_DURATION_MULTIPLIER};
+use super::{HD_FADE_OUT_DURATION_MULTIPLIER, scaling_factor::ScalingFactor};
 
 pub struct OsuRelaxDifficultyObject<'a> {
     pub idx: usize,
@@ -149,7 +149,8 @@ impl<'a> OsuRelaxDifficultyObject<'a> {
                 (stacked_tail_pos - self.base.stacked_pos()).length() * scaling_factor;
 
             let diff = f64::from(
-                OsuRelaxDifficultyObject::MAX_SLIDER_RADIUS - OsuRelaxDifficultyObject::ASSUMED_SLIDER_RADIUS,
+                OsuRelaxDifficultyObject::MAX_SLIDER_RADIUS
+                    - OsuRelaxDifficultyObject::ASSUMED_SLIDER_RADIUS,
             );
 
             let min = f64::from(tail_jump_dist - OsuRelaxDifficultyObject::MAX_SLIDER_RADIUS);

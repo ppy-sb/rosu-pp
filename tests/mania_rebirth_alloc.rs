@@ -124,9 +124,7 @@ impl DynDifficulty for Difficulty {
             Mode::Osu => DynIter::Osu(self.gradual_difficulty_for_mode::<Osu>(map).unwrap()),
             Mode::Taiko => DynIter::Taiko(self.gradual_difficulty_for_mode::<Taiko>(map).unwrap()),
             Mode::Catch => DynIter::Catch(self.gradual_difficulty_for_mode::<Catch>(map).unwrap()),
-            Mode::Mania => DynIter::Mania(
-                self.gradual_difficulty_for_mode::<Mania>(map).unwrap(),
-            ),
+            Mode::Mania => DynIter::Mania(self.gradual_difficulty_for_mode::<Mania>(map).unwrap()),
         }
     }
 }

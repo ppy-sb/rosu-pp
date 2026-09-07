@@ -3,8 +3,8 @@
 //! This complements the recovery offset measurement by quantifying not just
 //! the mean shift but also the spread widening under density pressure.
 
+use super::replay::ReplayAnalysis;
 use std::collections::HashMap;
-use super::replay::{ReplayAnalysis, Note};
 
 /// A bin collecting timing errors for notes within a gap range.
 #[derive(Clone, Debug, Default)]
@@ -52,17 +52,17 @@ pub const GAP_BIN_EDGES: [f64; 11] = [
 
 /// Representative gap for each bin (geometric midpoint).
 pub const GAP_BIN_REPRESENTATIVES: [f64; 12] = [
-    20.0,   // 0-40ms: very dense (jacks)
-    50.0,   // 40-60ms: dense streams
-    70.0,   // 60-80ms: medium-dense
-    90.0,   // 80-100ms: normal streams
-    115.0,  // 100-130ms: moderate
-    150.0,  // 130-170ms: relaxed
-    195.0,  // 170-220ms: slow
-    260.0,  // 220-300ms: sparse
-    370.0,  // 300-450ms: very sparse
-    570.0,  // 450-700ms: extremely sparse
-    1000.0, // 700ms+: breaks
+    20.0,          // 0-40ms: very dense (jacks)
+    50.0,          // 40-60ms: dense streams
+    70.0,          // 60-80ms: medium-dense
+    90.0,          // 80-100ms: normal streams
+    115.0,         // 100-130ms: moderate
+    150.0,         // 130-170ms: relaxed
+    195.0,         // 170-220ms: slow
+    260.0,         // 220-300ms: sparse
+    370.0,         // 300-450ms: very sparse
+    570.0,         // 450-700ms: extremely sparse
+    1000.0,        // 700ms+: breaks
     f64::INFINITY, // no predecessor (first note)
 ];
 

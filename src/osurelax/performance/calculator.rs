@@ -1,17 +1,17 @@
 use std::f64::consts::PI;
 
 use crate::{
+    GameMods,
     osurelax::{
+        OsuRelaxDifficultyAttributes, OsuRelaxPerformanceAttributes, OsuRelaxScoreState,
         difficulty::skills::{
             aim::Aim, flashlight::Flashlight, speed::Speed, strain::OsuStrainSkill,
         },
-        OsuRelaxDifficultyAttributes, OsuRelaxPerformanceAttributes, OsuRelaxScoreState,
     },
     util::{
         difficulty::{erf, erf_inv, reverse_lerp},
         float_ext::FloatExt,
     },
-    GameMods,
 };
 
 use super::{n_large_tick_miss, n_slider_ends_dropped, total_imperfect_hits};

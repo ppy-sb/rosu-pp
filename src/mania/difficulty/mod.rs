@@ -18,9 +18,7 @@ use crate::{
 };
 
 use super::{
-    attributes::ManiaDifficultyAttributes,
-    sunny::{JudgementUnitCache},
-    sunny_accuracy::{JudgementUnit},
+    attributes::ManiaDifficultyAttributes, sunny::JudgementUnitCache, sunny_accuracy::JudgementUnit,
 };
 
 mod evaluators;

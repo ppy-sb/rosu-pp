@@ -3,12 +3,10 @@ use std::{cmp, f64::consts::PI};
 use crate::{
     any::difficulty::{
         object::{HasStartTime, IDifficultyObject},
-        skills::{strain_decay, StrainSkill},
+        skills::{StrainSkill, strain_decay},
     },
     osurelax::difficulty::object::OsuRelaxDifficultyObject,
-    util::{
-        difficulty::{bpm_to_milliseconds, logistic, milliseconds_to_bpm},
-    },
+    util::difficulty::{bpm_to_milliseconds, logistic, milliseconds_to_bpm},
 };
 
 use super::strain::OsuStrainSkill;
@@ -91,7 +89,8 @@ impl OsuStrainSkill for Speed {}
 struct SpeedEvaluator;
 
 impl SpeedEvaluator {
-    const SINGLE_SPACING_THRESHOLD: f64 = OsuRelaxDifficultyObject::NORMALIZED_DIAMETER as f64 * 1.25; // 1.25 circlers distance between centers
+    const SINGLE_SPACING_THRESHOLD: f64 =
+        OsuRelaxDifficultyObject::NORMALIZED_DIAMETER as f64 * 1.25; // 1.25 circlers distance between centers
     const MIN_SPEED_BONUS: f64 = 200.0; // 200 BPM 1/4th
     const SPEED_BALANCING_FACTOR: f64 = 40.0;
     const DIST_MULTIPLIER: f64 = 0.9;
@@ -361,8 +360,8 @@ const MIN_DELTA_TIME: i32 = 25;
 
 // Compile-time check in case `OsuRelaxDifficultyObject::MIN_DELTA_TIME` changes
 // but we forget to update this value.
-const _: [(); 0 - !{ MIN_DELTA_TIME - OsuRelaxDifficultyObject::MIN_DELTA_TIME as i32 == 0 } as usize] =
-    [];
+const _: [(); 0 - !{ MIN_DELTA_TIME - OsuRelaxDifficultyObject::MIN_DELTA_TIME as i32 == 0 }
+    as usize] = [];
 
 impl RhythmIsland {
     const fn new(delta_difference_eps: f64) -> Self {

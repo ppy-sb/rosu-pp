@@ -1,4 +1,6 @@
-use rosu_pp::mania::sunny_accuracy::{TIMING_BASELINE_SIGMA, timing_sigma_for_counts, ErrorModel, JudgementUnit};
+use rosu_pp::mania::sunny_accuracy::{
+    ErrorModel, JudgementUnit, TIMING_BASELINE_SIGMA, timing_sigma_for_counts,
+};
 use rosu_pp::mania::sunny_windows::ManiaHitWindows;
 
 #[test]
@@ -37,9 +39,18 @@ fn find_reasonable_baseline() {
         let timing_ratio = TIMING_BASELINE_SIGMA / fitted_sigma;
         let timing_multiplier = timing_ratio.powf(0.5).clamp(0.7, 1.3);
 
-        println!("{:15} sigma={:5.1}ms, ratio={:.3}, mult={:.3}{}",
-                 label, fitted_sigma, timing_ratio, timing_multiplier,
-                 if (timing_multiplier - 1.0).abs() < 0.05 { " ← neutral" } else { "" });
+        println!(
+            "{:15} sigma={:5.1}ms, ratio={:.3}, mult={:.3}{}",
+            label,
+            fitted_sigma,
+            timing_ratio,
+            timing_multiplier,
+            if (timing_multiplier - 1.0).abs() < 0.05 {
+                " ← neutral"
+            } else {
+                ""
+            }
+        );
     }
 
     println!();

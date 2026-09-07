@@ -258,7 +258,6 @@ fn effective_windows_with_multiplier(
     clock_rate: f64,
     classic: bool,
 ) -> ManiaHitWindows {
-
     let raw = if classic {
         classic_windows(od, is_convert)
     } else {

@@ -154,7 +154,7 @@ let pp_pattern = 9.8 * pattern_difficulty.powf(2.2)
     * variety_multiplier * length_multiplier * multiplier;
 
 // Timing difficulty (from surface - currently broken)
-let timing_result = compute_timing_pp(attrs, state, model);
+let timing_result = compute_timing_pp(attrs, state, model); // alread removed. check compute_timing_pp_with_units
 let surface_transfer = (played_skill / baseline_skill).max(0.0);
 let surface_power = surface_transfer.powf(2.2);
 

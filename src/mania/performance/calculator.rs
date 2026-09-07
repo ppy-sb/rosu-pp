@@ -36,7 +36,8 @@ impl ManiaPerformanceCalculator<'_> {
         let difficulty_value = self.compute_difficulty_value(score_accuracy);
         let variety_multiplier = variety_multiplier(self.attrs.variety);
         let acc_multiplier = acc_multiplier(score_accuracy, self.attrs.acc_scalar);
-        let length_multiplier = length_multiplier(f64::from(self.attrs.n_objects), self.attrs.stars);
+        let length_multiplier =
+            length_multiplier(f64::from(self.attrs.n_objects), self.attrs.stars);
 
         let pp = difficulty_value
             * multiplier

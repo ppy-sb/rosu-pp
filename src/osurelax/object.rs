@@ -9,13 +9,13 @@ use rosu_map::{
 };
 
 use crate::{
+    Beatmap,
     model::{
         control_point::{DifficultyPoint, TimingPoint},
         hit_object::{HitObject, HitObjectKind, HoldNote, Slider, Spinner},
         mods::Reflection,
     },
     util::{get_precision_adjusted_beat_len, sort},
-    Beatmap,
 };
 
 use super::PLAYFIELD_BASE_SIZE;
@@ -43,9 +43,9 @@ impl OsuRelaxObject {
     ) -> Self {
         let kind = match h.kind {
             HitObjectKind::Circle => OsuRelaxObjectKind::Circle,
-            HitObjectKind::Slider(ref slider) => {
-                OsuRelaxObjectKind::Slider(OsuSlider::new(h, slider, map, reflection, curve_bufs, ticks_buf))
-            }
+            HitObjectKind::Slider(ref slider) => OsuRelaxObjectKind::Slider(OsuSlider::new(
+                h, slider, map, reflection, curve_bufs, ticks_buf,
+            )),
             HitObjectKind::Spinner(spinner) => OsuRelaxObjectKind::Spinner(spinner),
             HitObjectKind::Hold(HoldNote { duration }) => {
                 OsuRelaxObjectKind::Spinner(Spinner { duration })

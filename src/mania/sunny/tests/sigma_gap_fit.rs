@@ -1,21 +1,19 @@
 //! Fit a parametric function to the measured sigma vs gap curve.
 
-use super::recovery::{fit_recovery_curve, FitPoint, RecoveryFit};
-
-/// Measured sigma values at representative gap times from replay analysis.
-const MEASURED_SIGMA_POINTS: [(f64, f64); 11] = [
-    (50.0, 19.35),
-    (70.0, 23.97),
-    (90.0, 22.43),
-    (115.0, 25.97),
-    (150.0, 22.42),
-    (195.0, 17.56),
-    (260.0, 15.76),
-    (370.0, 15.52),
-    (570.0, 15.16),
-    (1000.0, 16.78),
-    (f64::INFINITY, 17.98), // no predecessor
-];
+// /// Measured sigma values at representative gap times from replay analysis.
+// const MEASURED_SIGMA_POINTS: [(f64, f64); 11] = [
+//     (50.0, 19.35),
+//     (70.0, 23.97),
+//     (90.0, 22.43),
+//     (115.0, 25.97),
+//     (150.0, 22.42),
+//     (195.0, 17.56),
+//     (260.0, 15.76),
+//     (370.0, 15.52),
+//     (570.0, 15.16),
+//     (1000.0, 16.78),
+//     (f64::INFINITY, 17.98), // no predecessor
+// ];
 
 /// Result of sigma curve fitting.
 #[derive(Clone, Copy, Debug)]
@@ -57,10 +55,10 @@ pub fn fit_sigma_curve(
     }
 
     // Initial search ranges based on observed data
-    let (mut base_lo, mut base_hi) = (12.0, 20.0);      // baseline sigma
-    let (mut amp_lo, mut amp_hi) = (4.0, 12.0);         // peak amplitude
-    let (mut peak_lo, mut peak_hi) = (80.0, 150.0);     // peak gap location
-    let (mut width_lo, mut width_hi) = (50.0, 200.0);   // width parameter
+    let (mut base_lo, mut base_hi) = (12.0, 20.0); // baseline sigma
+    let (mut amp_lo, mut amp_hi) = (4.0, 12.0); // peak amplitude
+    let (mut peak_lo, mut peak_hi) = (80.0, 150.0); // peak gap location
+    let (mut width_lo, mut width_hi) = (50.0, 200.0); // width parameter
 
     let mut best = (f64::INFINITY, 0.0, 0.0, 0.0, 0.0);
 
@@ -79,7 +77,8 @@ pub fn fit_sigma_curve(
                                 .iter()
                                 .filter(|(gap, _, _)| gap.is_finite()) // Skip infinity point
                                 .map(|&(gap, observed_sigma, weight)| {
-                                    let predicted = eval_sigma_curve(gap, baseline, amplitude, peak, width);
+                                    let predicted =
+                                        eval_sigma_curve(gap, baseline, amplitude, peak, width);
                                     weight as f64 * (predicted - observed_sigma).powi(2)
                                 })
                                 .sum();
@@ -157,13 +156,27 @@ mod tests {
 
         let fit = fit_sigma_curve(&points, 5).unwrap();
 
-        println!("Sigma fit: baseline={:.2} peak_amplitude={:.2} peak_gap={:.2} width={:.2} rmse={:.2}",
-                 fit.baseline, fit.peak_amplitude, fit.peak_gap, fit.width, fit.rmse);
+        println!(
+            "Sigma fit: baseline={:.2} peak_amplitude={:.2} peak_gap={:.2} width={:.2} rmse={:.2}",
+            fit.baseline, fit.peak_amplitude, fit.peak_gap, fit.width, fit.rmse
+        );
 
         // Check that fit is reasonable
-        assert!(fit.baseline > 10.0 && fit.baseline < 20.0, "baseline={}", fit.baseline);
-        assert!(fit.peak_amplitude > 2.0 && fit.peak_amplitude < 15.0, "amplitude={}", fit.peak_amplitude);
-        assert!(fit.peak_gap > 80.0 && fit.peak_gap < 150.0, "peak_gap={}", fit.peak_gap);
+        assert!(
+            fit.baseline > 10.0 && fit.baseline < 20.0,
+            "baseline={}",
+            fit.baseline
+        );
+        assert!(
+            fit.peak_amplitude > 2.0 && fit.peak_amplitude < 15.0,
+            "amplitude={}",
+            fit.peak_amplitude
+        );
+        assert!(
+            fit.peak_gap > 80.0 && fit.peak_gap < 150.0,
+            "peak_gap={}",
+            fit.peak_gap
+        );
         assert!(fit.width > 40.0 && fit.width < 250.0, "width={}", fit.width);
         assert!(fit.rmse < 3.0, "rmse={}", fit.rmse); // Should fit reasonably well
     }

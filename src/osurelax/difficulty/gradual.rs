@@ -3,20 +3,20 @@ use std::{cmp, mem};
 use rosu_map::section::general::GameMode;
 
 use crate::{
+    Beatmap, Difficulty,
     any::difficulty::skills::StrainSkill,
     model::mode::ConvertError,
     osurelax::{
         convert::convert_objects,
         object::{OsuRelaxObject, OsuRelaxObjectKind},
     },
-    Beatmap, Difficulty,
 };
 
 use self::osu_objects::OsuRelaxObjects;
 
 use super::{
-    object::OsuRelaxDifficultyObject, skills::OsuRelaxSkills, DifficultyValues, OsuRelaxDifficultyAttributes,
-    OsuRelaxDifficultySetup,
+    DifficultyValues, OsuRelaxDifficultyAttributes, OsuRelaxDifficultySetup,
+    object::OsuRelaxDifficultyObject, skills::OsuRelaxSkills,
 };
 
 /// Gradually calculate the difficulty attributes of an osu!standard map.
@@ -230,7 +230,9 @@ mod osu_objects {
             self.objects.is_empty()
         }
 
-        pub(super) fn iter_mut(&mut self) -> impl ExactSizeIterator<Item = Pin<&mut OsuRelaxObject>> {
+        pub(super) fn iter_mut(
+            &mut self,
+        ) -> impl ExactSizeIterator<Item = Pin<&mut OsuRelaxObject>> {
             self.objects.iter_mut().map(Pin::new)
         }
     }
@@ -238,7 +240,7 @@ mod osu_objects {
 
 #[cfg(test)]
 mod tests {
-    use crate::{osurelax::OsuRelax, Beatmap};
+    use crate::{Beatmap, osurelax::OsuRelax};
 
     use super::*;
 

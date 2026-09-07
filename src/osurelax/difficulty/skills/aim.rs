@@ -3,7 +3,7 @@ use std::f64::consts::FRAC_PI_2;
 use crate::{
     any::difficulty::{
         object::{HasStartTime, IDifficultyObject},
-        skills::{strain_decay, StrainSkill},
+        skills::{StrainSkill, strain_decay},
     },
     osurelax::difficulty::object::OsuRelaxDifficultyObject,
     util::{

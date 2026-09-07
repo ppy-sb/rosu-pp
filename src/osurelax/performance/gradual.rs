@@ -1,4 +1,4 @@
-use crate::{model::mode::ConvertError, osurelax::OsuRelaxGradualDifficulty, Beatmap, Difficulty};
+use crate::{Beatmap, Difficulty, model::mode::ConvertError, osurelax::OsuRelaxGradualDifficulty};
 
 use super::{OsuRelaxPerformanceAttributes, OsuRelaxScoreState};
 
@@ -106,7 +106,11 @@ impl OsuRelaxGradualPerformance {
     /// Note that the count is zero-indexed, so `n=0` will process 1 object,
     /// `n=1` will process 2, and so on.
     #[allow(clippy::missing_panics_doc)]
-    pub fn nth(&mut self, state: OsuRelaxScoreState, n: usize) -> Option<OsuRelaxPerformanceAttributes> {
+    pub fn nth(
+        &mut self,
+        state: OsuRelaxScoreState,
+        n: usize,
+    ) -> Option<OsuRelaxPerformanceAttributes> {
         let performance = self
             .difficulty
             .nth(n)?
@@ -130,7 +134,7 @@ impl OsuRelaxGradualPerformance {
 
 #[cfg(test)]
 mod tests {
-    use crate::{osurelax::OsuRelaxPerformance, Beatmap};
+    use crate::{Beatmap, osurelax::OsuRelaxPerformance};
 
     use super::*;
 

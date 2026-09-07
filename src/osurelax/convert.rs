@@ -45,7 +45,9 @@ pub fn convert_objects(
         .collect();
 
     match reflection {
-        Reflection::None => osu_objects.iter_mut().for_each(OsuRelaxObject::finalize_nested),
+        Reflection::None => osu_objects
+            .iter_mut()
+            .for_each(OsuRelaxObject::finalize_nested),
         Reflection::Vertical => osu_objects
             .iter_mut()
             .for_each(OsuRelaxObject::reflect_vertically),

@@ -4,7 +4,7 @@ use std::{cmp, f64::consts::PI};
 use crate::{
     any::difficulty::{
         object::{HasStartTime, IDifficultyObject},
-        skills::{strain_decay, StrainSkill},
+        skills::{StrainSkill, strain_decay},
     },
     osurelax::difficulty::object::OsuRelaxDifficultyObject,
     util::{
@@ -520,8 +520,8 @@ const MIN_DELTA_TIME: i32 = 25;
 
 // Compile-time check in case `OsuRelaxDifficultyObject::MIN_DELTA_TIME` changes
 // but we forget to update this value.
-const _: [(); 0 - !{ MIN_DELTA_TIME - OsuRelaxDifficultyObject::MIN_DELTA_TIME as i32 == 0 } as usize] =
-    [];
+const _: [(); 0 - !{ MIN_DELTA_TIME - OsuRelaxDifficultyObject::MIN_DELTA_TIME as i32 == 0 }
+    as usize] = [];
 
 impl RhythmIsland {
     const fn new(delta_difference_eps: f64) -> Self {

@@ -7,7 +7,7 @@ use crate::{
 use self::{aim::Aim, flashlight::Flashlight, relax::Relax, speed::Speed};
 
 use super::{
-    object::OsuRelaxDifficultyObject, scaling_factor::ScalingFactor, HD_FADE_IN_DURATION_MULTIPLIER,
+    HD_FADE_IN_DURATION_MULTIPLIER, object::OsuRelaxDifficultyObject, scaling_factor::ScalingFactor,
 };
 
 pub mod aim;
@@ -62,7 +62,11 @@ impl OsuRelaxSkills {
         }
     }
 
-    pub fn process(&mut self, curr: &OsuRelaxDifficultyObject<'_>, objects: &[OsuRelaxDifficultyObject<'_>]) {
+    pub fn process(
+        &mut self,
+        curr: &OsuRelaxDifficultyObject<'_>,
+        objects: &[OsuRelaxDifficultyObject<'_>],
+    ) {
         self.aim.process(curr, objects);
         self.relax.process(curr, objects);
         self.aim_no_sliders.process(curr, objects);

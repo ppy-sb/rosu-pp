@@ -2497,11 +2497,11 @@ fn ladder_report() {
     let scalars: Vec<f64> = all
         .iter()
         .map(|r| {
-            (if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+            if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
                 r.perf.pp / r.perf.xxy_pp_pattern
             } else {
                 1.0
-            })
+            }
         })
         .collect();
     let lo = scalars.iter().copied().fold(f64::INFINITY, f64::min);
@@ -2562,8 +2562,8 @@ fn ladder_report() {
 #[ignore = "writes CSV for plotting rather than asserting"]
 fn surface_dump() {
     use crate::mania::sunny_accuracy::{
-        expected_counts_at_core_sigma, ln_sigma_scale_for_duration,
-        sigma_scale_from_difficulty, TIMING_BASELINE_SIGMA,
+        TIMING_BASELINE_SIGMA, expected_counts_at_core_sigma, ln_sigma_scale_for_duration,
+        sigma_scale_from_difficulty,
     };
     use crate::mania::sunny_windows::ManiaJudgement;
     use std::fmt::Write as _;
@@ -2604,15 +2604,18 @@ fn surface_dump() {
 
     // In the new timing-based system, we vary core_sigma instead of skill
     // Map skill range to sigma range for visualization
-    let sigmas: Vec<f64> = skills.iter().map(|&s| {
-        // Map skill range [0.5, 60] to sigma range [30, 5] (inverse relationship)
-        // Higher skill -> lower sigma (tighter timing)
-        let log_skill = s.ln();
-        let log_min = 0.5_f64.ln();
-        let log_max = 60.0_f64.ln();
-        let t = (log_skill - log_min) / (log_max - log_min);
-        30.0 * (5.0_f64 / 30.0).powf(t.clamp(0.0, 1.0))
-    }).collect();
+    let sigmas: Vec<f64> = skills
+        .iter()
+        .map(|&s| {
+            // Map skill range [0.5, 60] to sigma range [30, 5] (inverse relationship)
+            // Higher skill -> lower sigma (tighter timing)
+            let log_skill = s.ln();
+            let log_min = 0.5_f64.ln();
+            let log_max = 60.0_f64.ln();
+            let t = (log_skill - log_min) / (log_max - log_min);
+            30.0 * (5.0_f64 / 30.0).powf(t.clamp(0.0, 1.0))
+        })
+        .collect();
 
     let mut grid = String::from("difficulty,sigma,accuracy,miss_rate\n");
 
@@ -2712,11 +2715,13 @@ fn surface_dump() {
                     for variant in ["baseline", "ln_as_rice"] {
                         let unit = if variant == "baseline" {
                             duration.map_or_else(
-                                || JudgementUnit::new(*difficulty).with_sigma_scale(
-                                    sigma_scale_from_difficulty(
-                                        *difficulty / reference_difficulty * map_difficulty,
-                                    ),
-                                ),
+                                || {
+                                    JudgementUnit::new(*difficulty).with_sigma_scale(
+                                        sigma_scale_from_difficulty(
+                                            *difficulty / reference_difficulty * map_difficulty,
+                                        ),
+                                    )
+                                },
                                 |duration| {
                                     JudgementUnit::long_note(*difficulty, 1.0, &model, duration)
                                         .with_sigma_scale(
@@ -2733,7 +2738,12 @@ fn surface_dump() {
                                 ),
                             )
                         };
-                        let counts = expected_counts_at_core_sigma(&[unit], &attrs.hit_windows, &model, core_sigma);
+                        let counts = expected_counts_at_core_sigma(
+                            &[unit],
+                            &attrs.hit_windows,
+                            &model,
+                            core_sigma,
+                        );
                         let p = counts.as_array();
                         let accuracy = counts.custom_accuracy();
                         let acc_d = difficulty * (1.0 - accuracy);
@@ -2833,7 +2843,8 @@ fn surface_dump() {
         };
 
         for &sigma in &sigmas {
-            let accuracy = expected_counts_at_core_sigma(&units, &windows, &model, sigma).custom_accuracy();
+            let accuracy =
+                expected_counts_at_core_sigma(&units, &windows, &model, sigma).custom_accuracy();
             writeln!(windows_csv, "{label},{great},{sigma},{accuracy}").unwrap();
         }
     }
@@ -3955,8 +3966,7 @@ fn load_multiuser() -> Vec<MultiPriced> {
 
     let tsv = std::env::var_os("SUNNY_MULTIUSER_TSV")
         .unwrap_or_else(|| "local-fixtures/multiuser.tsv".into());
-    let maps_dir = std::env::var_os("SUNNY_MAPS")
-        .unwrap_or_else(|| "local-fixtures/maps".into());
+    let maps_dir = std::env::var_os("SUNNY_MAPS").unwrap_or_else(|| "local-fixtures/maps".into());
 
     let Ok(text) = std::fs::read_to_string(tsv) else {
         return Vec::new();
@@ -4292,8 +4302,8 @@ fn load_ladder(path: &str) -> Vec<MultiPriced> {
 /// surface alone, with the live column left in as a cross-check on how far the
 /// two sunny versions have otherwise moved.
 ///
-/// `cargo test --release --lib multiuser_report -- --ignored --nocapture --exact
-/// mania::sunny::tests::multiuser_report`
+/// `cargo test --release --lib mania::sunny::tests::multiuser_report --
+/// --ignored --nocapture --exact`
 ///
 /// Set `SUNNY_MULTIUSER_TSV` and `SUNNY_MAPS` to report on another BP fixture.
 #[test]
@@ -4470,11 +4480,11 @@ fn multiuser_report() {
         let scalars: Vec<f64> = band
             .iter()
             .map(|r| {
-                (if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
                     r.perf.pp / r.perf.xxy_pp_pattern
                 } else {
                     1.0
-                })
+                }
             })
             .collect();
         println!(
@@ -4503,11 +4513,11 @@ fn multiuser_report() {
         let mean_ln = band
             .iter()
             .map(|r| {
-                (if r.attrs.n_objects > 0 {
+                if r.attrs.n_objects > 0 {
                     r.attrs.n_long_notes as f64 / r.attrs.n_objects as f64
                 } else {
                     0.0
-                })
+                }
             })
             .sum::<f64>()
             / n;
@@ -5012,11 +5022,11 @@ fn ln_offset_under_the_fixed_reference() {
         let mut scalar: Vec<f64> = rows
             .iter()
             .map(|r| {
-                (if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+                if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
                     r.perf.pp / r.perf.xxy_pp_pattern
                 } else {
                     1.0
-                })
+                }
             })
             .collect();
         println!(
@@ -6024,17 +6034,17 @@ fn summarise_group(label: &str, rows: &[&MultiPriced]) {
     let current: f64 = rows.iter().map(|r| r.perf.pp).sum();
     let sunny_local: f64 = rows
         .iter()
-        .map(|r| (r.perf.xxy_pp_pattern + r.perf.xxy_pp_accuracy))
+        .map(|r| r.perf.xxy_pp_pattern + r.perf.xxy_pp_accuracy)
         .sum();
     let live: f64 = rows.iter().map(|r| r.row.live_pp).sum();
     let mean_scalar = rows
         .iter()
         .map(|r| {
-            (if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
+            if r.perf.xxy_pp_pattern.abs() > f64::EPSILON {
                 r.perf.pp / r.perf.xxy_pp_pattern
             } else {
                 1.0
-            })
+            }
         })
         .sum::<f64>()
         / n;

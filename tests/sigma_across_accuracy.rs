@@ -1,4 +1,6 @@
-use rosu_pp::mania::sunny_accuracy::{TIMING_BASELINE_SIGMA, timing_sigma_for_counts, ErrorModel, JudgementUnit};
+use rosu_pp::mania::sunny_accuracy::{
+    ErrorModel, JudgementUnit, TIMING_BASELINE_SIGMA, timing_sigma_for_counts,
+};
 use rosu_pp::mania::sunny_windows::ManiaHitWindows;
 
 #[test]
@@ -35,8 +37,10 @@ fn debug_various_accuracy_scores() {
 
         let acc = (counts[0] + counts[1]) as f64 / total as f64 * 100.0;
 
-        println!("{:20} acc={:.1}%, sigma={:.1}ms, ratio={:.3}, mult={:.3}",
-                 label, acc, fitted_sigma, timing_ratio, timing_multiplier);
+        println!(
+            "{:20} acc={:.1}%, sigma={:.1}ms, ratio={:.3}, mult={:.3}",
+            label, acc, fitted_sigma, timing_ratio, timing_multiplier
+        );
     }
 
     println!("\n⚠️  If all multipliers are 0.700, the baseline (11ms) is too low!");

@@ -3,7 +3,11 @@
 #[test]
 fn test_ratio_based_approach() {
     let test_cases = vec![
-        ("EZDT uid 10031 #1", [2123_u32, 2420, 1778, 153, 4, 194], 85.7),
+        (
+            "EZDT uid 10031 #1",
+            [2123_u32, 2420, 1778, 153, 4, 194],
+            85.7,
+        ),
         ("EZDT uid 10031 #2", [1754, 2050, 1334, 119, 1, 160], 86.5),
         ("EZDT uid 10107 #1", [1359, 1458, 783, 52, 3, 65], 89.4),
         ("Normal uid 10158 #1", [3987, 1469, 49, 6, 1, 11], 99.4),
@@ -16,7 +20,7 @@ fn test_ratio_based_approach() {
     println!("\n=== 320-Ratio Based Approach ===");
     println!();
 
-    for (label, counts, expected_acc) in test_cases {
+    for (label, counts, _expected_acc) in test_cases {
         let total: u32 = counts.iter().sum();
         let acc = (counts[0] + counts[1]) as f64 / total as f64 * 100.0;
 
@@ -25,8 +29,14 @@ fn test_ratio_based_approach() {
         let quality_score = ratio_320 - bad_ratio * 0.5;
         let timing_multiplier = (0.7 + quality_score * 0.45).clamp(0.7, 1.15);
 
-        println!("{:25} acc={:5.1}%, 320%={:5.1}%, quality={:.3}, mult={:.3}",
-                 label, acc, ratio_320 * 100.0, quality_score, timing_multiplier);
+        println!(
+            "{:25} acc={:5.1}%, 320%={:5.1}%, quality={:.3}, mult={:.3}",
+            label,
+            acc,
+            ratio_320 * 100.0,
+            quality_score,
+            timing_multiplier
+        );
     }
 
     println!();
