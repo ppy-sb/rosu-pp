@@ -2558,7 +2558,10 @@ fn ladder_report() {
 #[test]
 #[ignore = "writes CSV for plotting rather than asserting"]
 fn surface_dump() {
-    use crate::mania::sunny_accuracy::{expected_counts_at_core_sigma, TIMING_BASELINE_SIGMA};
+    use crate::mania::sunny_accuracy::{
+        expected_counts_at_core_sigma, ln_sigma_scale_for_duration,
+        sigma_scale_from_difficulty, TIMING_BASELINE_SIGMA,
+    };
     use crate::mania::sunny_windows::ManiaJudgement;
     use std::fmt::Write as _;
 
@@ -2626,7 +2629,7 @@ fn surface_dump() {
 
     std::fs::write(dir.join("grid.csv"), grid).unwrap();
 
-    let difficulty = map_slice
+    let map_difficulty = map_slice
         .as_ref()
         .map_or(13.774, |(_, _, attrs)| attrs.stars);
     let source = map_slice
@@ -2635,11 +2638,11 @@ fn surface_dump() {
     let units = map_slice
         .as_ref()
         .map(|(_, _, attrs)| judgement_units(attrs, 1.0, &model, true))
-        .unwrap_or_else(|| vec![JudgementUnit::new(difficulty)]);
+        .unwrap_or_else(|| vec![JudgementUnit::new(map_difficulty)]);
 
     std::fs::write(
         dir.join("surface_2d_meta.csv"),
-        format!("difficulty,clock_rate,source\n{difficulty},{clock_rate},{source}\n"),
+        format!("difficulty,clock_rate,source\n{map_difficulty},{clock_rate},{source}\n"),
     )
     .unwrap();
 
@@ -2690,37 +2693,38 @@ fn surface_dump() {
             if let Some((_, _, attrs)) = map_slice.as_ref() {
                 let model = ErrorModel::default();
                 let core_sigma = TIMING_BASELINE_SIGMA;
-
-                // Helper to compute sigma_scale from difficulty
-                // Maps difficulty variation to timing spread variation
-                // Reference difficulty chosen so map average gets scale ≈ 1.0
-                const DIFFICULTY_FLOOR: f64 = 0.6;
-                const SKILL_EXPONENT: f64 = 1.7;
-                let reference_difficulty = difficulty; // Use map difficulty as reference
-
+                let reference_difficulty = per_note.iter().map(|(d, _)| d).sum::<f64>()
+                    / per_note.len() as f64;
                 let mut csv = String::from(
                     "time_ms,note_index,variant,difficulty,miss,p50,p100,p200,p300,p320,custom_accuracy,acc_d\n",
                 );
-                for (idx, ((note_difficulty, duration), object)) in
+                for (idx, ((difficulty, duration), object)) in
                     per_note.iter().zip(&map.hit_objects).enumerate()
                 {
                     for variant in ["baseline", "ln_as_rice"] {
-                        let mut unit = if variant == "baseline" {
+                        let unit = if variant == "baseline" {
                             duration.map_or_else(
-                                || JudgementUnit::new(*note_difficulty),
+                                || JudgementUnit::new(*difficulty).with_sigma_scale(
+                                    sigma_scale_from_difficulty(
+                                        *difficulty / reference_difficulty * map_difficulty,
+                                    ),
+                                ),
                                 |duration| {
-                                    JudgementUnit::long_note(*note_difficulty, 1.0, &model, duration)
+                                    JudgementUnit::long_note(*difficulty, 1.0, &model, duration)
+                                        .with_sigma_scale(
+                                            sigma_scale_from_difficulty(
+                                                *difficulty / reference_difficulty * map_difficulty,
+                                            ) * ln_sigma_scale_for_duration(&model, duration),
+                                        )
                                 },
                             )
                         } else {
-                            JudgementUnit::new(*note_difficulty)
+                            JudgementUnit::new(*difficulty).with_sigma_scale(
+                                sigma_scale_from_difficulty(
+                                    *difficulty / reference_difficulty * map_difficulty,
+                                ),
+                            )
                         };
-
-                        // Scale timing spread based on note difficulty relative to map average
-                        let sigma_scale = ((note_difficulty + DIFFICULTY_FLOOR) / (reference_difficulty + DIFFICULTY_FLOOR))
-                            .powf(SKILL_EXPONENT);
-                        unit = unit.with_sigma_scale(unit.sigma_scale * sigma_scale);
-
                         let counts = expected_counts_at_core_sigma(&[unit], &attrs.hit_windows, &model, core_sigma);
                         let p = counts.as_array();
                         let accuracy = counts.custom_accuracy();
@@ -2833,7 +2837,7 @@ fn surface_dump() {
         dir.display(),
         difficulties.len(),
         skills.len(),
-        difficulty,
+        map_difficulty,
         source,
     );
 }

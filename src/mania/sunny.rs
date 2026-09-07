@@ -23,7 +23,8 @@ use rosu_mods::{Acronym, GameMods};
 
 use crate::mania::sunny_accuracy::{
     ErrorModel, JudgementUnit, LN_DURATION_BUCKETS, TIMING_BASELINE_SIGMA,
-    expected_counts_at_core_sigma, timing_sigma_for_counts,
+    expected_counts_at_core_sigma, ln_sigma_scale_for_duration, sigma_scale_from_difficulty,
+    timing_sigma_for_counts,
 };
 use crate::mania::sunny_windows::{ManiaHitWindows, hit_windows};
 
@@ -1298,6 +1299,8 @@ fn judgement_units(
     model: &ErrorModel,
     per_note: bool,
 ) -> Vec<JudgementUnit> {
+    // A uniform fallback represents the map at its star difficulty; there is no
+    // within-map contrast to add on top.
     let uniform = vec![JudgementUnit::repeated(attrs.stars, total)];
 
     // A zero recovery amplitude is the explicit control path used by the natural
@@ -1398,6 +1401,16 @@ fn units_from_input_state_bins(
     let per_operation = total / f64::from(binned);
     let mut units = Vec::with_capacity(INPUT_STATE_BINS * 2);
 
+    let reference_difficulty = bins
+        .iter()
+        .filter(|bin| bin.count > 0 && !(attrs.ln_judged_as_one && bin.class == InputClass::Release))
+        .map(|bin| bin.mean_difficulty * f64::from(bin.count))
+        .sum::<f64>()
+        / f64::from(binned);
+
+    // Put each raw local d value back on the map's star-rating gauge before applying
+    // the old power law. This preserves both map-level difficulty and local contrast.
+
     // The recovery curve was measured as each state group's mean error relative to
     // that score's own mean error. Preserve that gauge here: a map's state mixture
     // may redistribute timing error between notes, but it must not manufacture a
@@ -1444,7 +1457,9 @@ fn units_from_input_state_bins(
             );
             unit.fading_mean_offset = class_offset;
             // Apply gap-based sigma scaling
-            unit.sigma_scale *= model.sigma_scale_from_gap(bin.mean_gap_ms);
+            let effective_difficulty = bin.mean_difficulty / reference_difficulty * attrs.stars;
+            unit.sigma_scale = sigma_scale_from_difficulty(effective_difficulty)
+                * model.sigma_scale_from_gap(bin.mean_gap_ms);
             units.push(unit);
         }
 
@@ -1457,7 +1472,10 @@ fn units_from_input_state_bins(
             );
             unit.fading_mean_offset = class_offset;
             // Apply gap-based sigma scaling
-            unit.sigma_scale *= model.sigma_scale_from_gap(bin.mean_gap_ms);
+            let effective_difficulty = bin.mean_difficulty / reference_difficulty * attrs.stars;
+            unit.sigma_scale = sigma_scale_from_difficulty(effective_difficulty)
+                * ln_sigma_scale_for_duration(model, bin.mean_duration_ms)
+                * model.sigma_scale_from_gap(bin.mean_gap_ms);
             units.push(unit);
         }
     }
@@ -1506,13 +1524,21 @@ fn units_from_difficulty_bins(
     let per_note = total / f64::from(binned_notes);
     let combined_long_notes = attrs.ln_judged_as_one && !ln_split_disabled();
     let mut units = Vec::with_capacity(NOTE_DIFFICULTY_BINS * 2);
+    let reference_difficulty = bins
+        .iter()
+        .map(|bin| f64::from(bin.rice + bin.long) * bin.difficulty)
+        .sum::<f64>()
+        / f64::from(binned_notes);
 
     for bin in bins {
         if bin.rice > 0 {
             units.push(JudgementUnit::repeated(
                 bin.difficulty,
                 f64::from(bin.rice) * per_note,
-            ));
+            )
+            .with_sigma_scale(sigma_scale_from_difficulty(
+                bin.difficulty / reference_difficulty * attrs.stars,
+            )));
         }
 
         if bin.long == 0 {
@@ -1527,9 +1553,20 @@ fn units_from_difficulty_bins(
                 weight,
                 model,
                 bin.mean_duration,
+            )
+            .with_sigma_scale(
+                sigma_scale_from_difficulty(
+                    bin.difficulty / reference_difficulty * attrs.stars,
+                ) * ln_sigma_scale_for_duration(model, bin.mean_duration),
             ));
         } else {
-            units.push(JudgementUnit::repeated(bin.difficulty, weight));
+            units.push(
+                JudgementUnit::repeated(bin.difficulty, weight).with_sigma_scale(
+                    sigma_scale_from_difficulty(
+                        bin.difficulty / reference_difficulty * attrs.stars,
+                    ),
+                ),
+            );
         }
     }
 

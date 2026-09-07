@@ -259,6 +259,14 @@ const DEFAULT_SIGMA_REF: f64 = 18.0;
 const DEFAULT_SKILL_EXPONENT: f64 = 1.7;
 #[cfg(test)]
 const DEFAULT_DIFFICULTY_FLOOR: f64 = 0.6;
+
+// The fixed-spread path keeps `core_sigma` as the spread of a representative
+// six-star note. These are the same floor and exponent as the former
+// `sigma(d, skill)` curve; only the skill-dependent coefficient has moved to
+// `core_sigma`.
+const TIMING_DIFFICULTY_REFERENCE: f64 = 6.0;
+const TIMING_DIFFICULTY_FLOOR: f64 = 0.6;
+const TIMING_DIFFICULTY_EXPONENT: f64 = 1.7;
 const DEFAULT_LAPSE_WEIGHT: f64 = 0.0296;
 const DEFAULT_LAPSE_RATIO: f64 = 3.339;
 const DEFAULT_SHORT_HOLD_SCALE: f64 = 120.0;
@@ -663,28 +671,30 @@ impl ErrorModel {
     /// Sigma scale factor based on gap time to previous note.
     ///
     /// Returns a multiplier on the base sigma, following a Gaussian curve:
-    /// `sigma_multiplier = (baseline + amplitude * exp(-(gap - peak)^2 / (2 * width^2))) / TIMING_BASELINE_SIGMA`
+    /// `sigma_multiplier = (baseline + amplitude * exp(-(gap - peak)^2 / (2 * width^2))) / baseline`
     ///
-    /// The division by TIMING_BASELINE_SIGMA normalizes to the baseline sigma used in the model.
-    /// At sparse gaps (200ms+): factor ≈ 1.4 (wider than baseline)
-    /// At peak density (~114ms): factor ≈ 2.3 (much wider)
-    /// At very dense (<50ms): factor ≈ 1.8 (moderately wider)
+    /// The curve is normalized to its sparse-gap baseline. At long gaps the multiplier
+    /// is therefore 1, so a player's core spread is recovered after a dense passage.
     pub fn sigma_scale_from_gap(&self, gap_ms: f64) -> f64 {
         if self.sigma_baseline == 0.0 && self.sigma_peak_amplitude == 0.0 {
             return 1.0; // Disabled
         }
 
         if !gap_ms.is_finite() {
-            // No predecessor: use baseline
-            return self.sigma_baseline / TIMING_BASELINE_SIGMA;
+            // No predecessor: use the sparse-gap baseline.
+            return 1.0;
         }
 
         let deviation = gap_ms - self.sigma_peak_gap;
         let exponent = -(deviation * deviation) / (2.0 * self.sigma_width * self.sigma_width);
         let sigma = self.sigma_baseline + self.sigma_peak_amplitude * exponent.exp();
 
-        // Normalize to baseline sigma
-        sigma / TIMING_BASELINE_SIGMA
+        // Keep the measured curve as a variation around the player's core spread.
+        if self.sigma_baseline > 0.0 {
+            sigma / self.sigma_baseline
+        } else {
+            1.0
+        }
     }
 
     /// The timing error standard deviation, in ms, for local difficulty
@@ -1113,10 +1123,10 @@ pub struct JudgementUnit {
     /// A multiplier on this unit's timing spread, for units that are structurally
     /// wider than a plain note at the same difficulty.
     ///
-    /// One for an ordinary note. [`LN_SIGMA_SCALE`] for a ScoreV1 long note, where
-    /// two offsets are summed into one judgement so their variances add. Always
-    /// read off the map's own structure, never fitted to the score — see
-    /// [`Self::long_note`].
+    /// The local-difficulty scale for an ordinary note. A ScoreV1 long note
+    /// additionally multiplies this by its release scale, where two offsets are
+    /// summed into one judgement so their variances add. Always read off the map's
+    /// own structure, never fitted to the score — see [`Self::long_note`].
     pub sigma_scale: f64,
     /// A shift, in ms, applied to this unit's error distribution mean (positive =
     /// late).
@@ -1252,13 +1262,43 @@ pub fn ln_sigma_scale_for_duration(model: &ErrorModel, duration: f64) -> f64 {
     ln_sigma_scale(release_ratio_for_duration(model, duration))
 }
 
+/// Relative timing spread for a note of local difficulty `difficulty` against a
+/// map-level reference difficulty.
+///
+/// The old skill model was `18 * ((d + 0.6) / skill)^1.7`. In the millisecond
+/// model the skill-dependent coefficient is represented by `core_sigma`, so the
+/// remaining map-dependent part is this ratio against the supplied reference:
+/// `((d + 0.6) / (reference + 0.6))^1.7`. Keeping the ratio (rather than using an
+/// absolute power) preserves the old difficulty relationship without making
+/// `core_sigma` map-dependent.
+pub fn sigma_scale_from_difficulty_ratio(difficulty: f64, reference: f64) -> f64 {
+    let numerator = difficulty.max(0.0) + TIMING_DIFFICULTY_FLOOR;
+    let denominator = reference.max(0.0) + TIMING_DIFFICULTY_FLOOR;
+    let scale = (numerator / denominator).powf(TIMING_DIFFICULTY_EXPONENT);
+
+    if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    }
+}
+
+/// Relative timing spread using six stars as the reference gauge.
+///
+/// This is useful for standalone units and diagnostics. Production map builders use
+/// [`sigma_scale_from_difficulty_ratio`] with the map's weighted mean local difficulty
+/// so raw `d_all` values do not shift an entire map away from the player's core spread.
+pub fn sigma_scale_from_difficulty(difficulty: f64) -> f64 {
+    sigma_scale_from_difficulty_ratio(difficulty, TIMING_DIFFICULTY_REFERENCE)
+}
+
 impl JudgementUnit {
     /// A single judgement of the given local difficulty.
     pub fn new(difficulty: f64) -> Self {
         Self {
             difficulty,
             weight: 1.0,
-            sigma_scale: 1.0,
+            sigma_scale: sigma_scale_from_difficulty(difficulty),
             mean_offset: 0.0,
             fading_mean_offset: 0.0,
         }
@@ -1269,7 +1309,7 @@ impl JudgementUnit {
         Self {
             difficulty,
             weight: count,
-            sigma_scale: 1.0,
+            sigma_scale: sigma_scale_from_difficulty(difficulty),
             mean_offset: 0.0,
             fading_mean_offset: 0.0,
         }
@@ -1287,7 +1327,8 @@ impl JudgementUnit {
         Self {
             difficulty,
             weight: count,
-            sigma_scale: ln_sigma_scale_for_duration(model, duration_ms),
+            sigma_scale: sigma_scale_from_difficulty(difficulty)
+                * ln_sigma_scale_for_duration(model, duration_ms),
             mean_offset: model.release_mean_offset,
             fading_mean_offset: 0.0,
         }
@@ -1313,7 +1354,12 @@ pub fn expected_counts(
     let mut totals = [0.0; 6];
 
     for unit in units {
-        let sigma = model.sigma(unit.difficulty, skill) * unit.sigma_scale;
+        // `sigma_scale` carries the fixed-spread difficulty factor as well as any
+        // structural widening (for example, a long-note release). The legacy
+        // skill surface already derives difficulty from `model.sigma`, so remove
+        // only the former here to keep that diagnostic path equivalent.
+        let structural_scale = unit.sigma_scale / sigma_scale_from_difficulty(unit.difficulty);
+        let sigma = model.sigma(unit.difficulty, skill) * structural_scale;
         let fade = if model.sigma_ref.is_finite() && model.sigma_ref > 0.0 {
             (sigma / model.sigma_ref).clamp(0.0, 1.0)
         } else {
@@ -1324,7 +1370,7 @@ pub fn expected_counts(
             model,
             unit.difficulty,
             skill,
-            unit.sigma_scale,
+            structural_scale,
             unit.mean_offset + unit.fading_mean_offset * fade,
         );
 
@@ -1338,8 +1384,9 @@ pub fn expected_counts(
 
 /// Expected counts at a supplied core timing spread in milliseconds.
 ///
-/// Local star difficulty does not set the distribution width. Map structure can still
-/// alter LN spread and replay-measured input-state mean offsets.
+/// Local star difficulty sets each unit's spread relative to the six-star reference;
+/// map structure can additionally alter LN spread and replay-measured input-state
+/// mean offsets.
 pub fn expected_counts_at_core_sigma(
     units: &[JudgementUnit],
     windows: &ManiaHitWindows,
@@ -1994,6 +2041,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn difficulty_changes_fixed_sigma_spread_with_the_old_power_law() {
+        let easy = JudgementUnit::new(2.0).sigma_scale;
+        let reference = JudgementUnit::new(TIMING_DIFFICULTY_REFERENCE).sigma_scale;
+        let hard = JudgementUnit::new(10.0).sigma_scale;
+
+        assert!(easy < reference && reference < hard);
+
+        let expected_ratio = ((10.0 + TIMING_DIFFICULTY_FLOOR) / (2.0 + TIMING_DIFFICULTY_FLOOR))
+            .powf(TIMING_DIFFICULTY_EXPONENT);
+        assert!((hard / easy - expected_ratio).abs() < 1e-12);
+        assert!((reference - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn long_note_scale_composes_with_difficulty_scale() {
+        let model = ErrorModel::default();
+        let plain = JudgementUnit::new(8.0).sigma_scale;
+        let long = JudgementUnit::long_note(8.0, 1.0, &model, 150.0).sigma_scale;
+
+        assert!((long / plain - ln_sigma_scale_for_duration(&model, 150.0)).abs() < 1e-12);
+    }
+
     /// `sqrt(1 + k^2)` at `k = 1` is `sqrt(2)`, and a release cannot be easier to place
     /// than a press.
     #[test]
@@ -2139,6 +2209,15 @@ mod tests {
         assert_eq!(model.recovery_mean_offset(f64::INFINITY), 0.0);
         assert_eq!(model.recovery_mean_offset(f64::NAN), 0.0);
         assert_eq!(model.recovery_mean_offset(-1.0), 16.81);
+    }
+
+    #[test]
+    fn sigma_gap_scale_recovers_the_core_at_sparse_gaps() {
+        let model = ErrorModel::default();
+
+        assert!((model.sigma_scale_from_gap(f64::INFINITY) - 1.0).abs() < 1e-12);
+        assert!(model.sigma_scale_from_gap(model.sigma_peak_gap) > 1.0);
+        assert!((model.sigma_scale_from_gap(1000.0) - 1.0).abs() < 0.01);
     }
 
     #[test]
