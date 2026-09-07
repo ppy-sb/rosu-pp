@@ -2547,12 +2547,15 @@ fn ladder_report() {
 ///
 /// Not an assertion — dumps three CSV slices under `target/surface/`:
 ///
-/// - `grid.csv`: 305-weighted accuracy over (difficulty, skill) at
+/// - `grid.csv`: 305-weighted accuracy over (difficulty, sigma) at
 ///   [`REFERENCE_WINDOWS`]. This *is* the surface.
 /// - `bands.csv`: the five timing-band shares plus miss rate against skill at one
 ///   fixed difficulty — the mechanism the surface is built from.
 /// - `windows.csv`: accuracy against skill at one difficulty for several window
 ///   sets, retained for calibration and historical comparison.
+///
+/// `SURFACE_CORE_SIGMA` selects the core timing spread used for the per-note
+/// expected-count overlay (default: [`TIMING_BASELINE_SIGMA`]).
 ///
 /// Run with `cargo test surface_dump -- --ignored --nocapture`.
 #[test]
@@ -2639,10 +2642,16 @@ fn surface_dump() {
         .as_ref()
         .map(|(_, _, attrs)| judgement_units(attrs, 1.0, &model, true))
         .unwrap_or_else(|| vec![JudgementUnit::new(map_difficulty)]);
+    let core_sigma = env("SURFACE_CORE_SIGMA")
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|sigma| sigma.is_finite() && *sigma > 0.0)
+        .unwrap_or(TIMING_BASELINE_SIGMA);
 
     std::fs::write(
         dir.join("surface_2d_meta.csv"),
-        format!("difficulty,clock_rate,source\n{map_difficulty},{clock_rate},{source}\n"),
+        format!(
+            "difficulty,clock_rate,core_sigma,source\n{map_difficulty},{clock_rate},{core_sigma},{source}\n"
+        ),
     )
     .unwrap();
 
@@ -2692,9 +2701,8 @@ fn surface_dump() {
 
             if let Some((_, _, attrs)) = map_slice.as_ref() {
                 let model = ErrorModel::default();
-                let core_sigma = TIMING_BASELINE_SIGMA;
-                let reference_difficulty = per_note.iter().map(|(d, _)| d).sum::<f64>()
-                    / per_note.len() as f64;
+                let reference_difficulty =
+                    per_note.iter().map(|(d, _)| d).sum::<f64>() / per_note.len() as f64;
                 let mut csv = String::from(
                     "time_ms,note_index,variant,difficulty,miss,p50,p100,p200,p300,p320,custom_accuracy,acc_d\n",
                 );

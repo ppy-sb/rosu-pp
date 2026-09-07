@@ -101,9 +101,14 @@ def dump(args: argparse.Namespace) -> None:
     ]
     print("$", " ".join(command))
     env = dict(os.environ)
+    # The per-note overlay is evaluated at the requested core sigma. Clear any
+    # inherited value when the option is omitted so each dump is deterministic.
+    env.pop("SURFACE_CORE_SIGMA", None)
     if args.map:
         env["SURFACE_MAP"] = str(args.map)
     env["SURFACE_CLOCK_RATE"] = str(args.clock_rate)
+    if args.fit_sigma is not None:
+        env["SURFACE_CORE_SIGMA"] = str(args.fit_sigma)
     result = subprocess.run(command, cwd=ROOT, env=env, check=False)
 
     if result.returncode != 0:
@@ -484,7 +489,10 @@ def main() -> None:
         "--clock-rate", type=float, default=1.0, help="clock rate used to rate the map (default 1.0)"
     )
     parser.add_argument(
-        "--fit-sigma", type=float, default=None, help="mark this timing spread on the composition panel"
+        "--fit-sigma",
+        type=float,
+        default=None,
+        help="use this core timing spread (ms) for the per-note overlay and mark it on the bands panel",
     )
     parser.add_argument(
         "--target-accuracy", type=float, default=None, help="mark this accuracy on the windows panel"
@@ -493,6 +501,9 @@ def main() -> None:
         "--no-dump", action="store_true", help="reuse the existing CSVs instead of re-running cargo"
     )
     args = parser.parse_args()
+
+    if args.fit_sigma is not None and (not np.isfinite(args.fit_sigma) or args.fit_sigma <= 0.0):
+        parser.error("--fit-sigma must be a finite, positive number")
 
     if args.fetch:
         args.map = fetch_map(args.map)
@@ -503,12 +514,24 @@ def main() -> None:
     difficulty = 0.0
     source = args.map.stem
     meta_path = DATA / "surface_2d_meta.csv"
+    dumped_core_sigma = None
     if meta_path.exists():
         with meta_path.open() as handle:
             meta = next(csv.DictReader(handle), None)
         if meta:
             difficulty = float(meta["difficulty"])
             source = Path(meta["source"]).stem
+            if meta.get("core_sigma"):
+                dumped_core_sigma = float(meta["core_sigma"])
+
+    if args.no_dump and args.fit_sigma is not None:
+        if dumped_core_sigma is None:
+            sys.exit("--fit-sigma requires a dump generated with core-sigma metadata; omit --no-dump")
+        if not np.isclose(args.fit_sigma, dumped_core_sigma, rtol=1e-9, atol=1e-9):
+            sys.exit(
+                f"existing surface dump uses core sigma {dumped_core_sigma:g} ms, "
+                f"not requested {args.fit_sigma:g} ms; omit --no-dump to regenerate"
+            )
 
     acc, miss, diffs, sigmas = load_grid()
     X, Y = np.meshgrid(diffs, sigmas)

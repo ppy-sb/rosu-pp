@@ -219,11 +219,11 @@ threshold, so an OD axis would be two flat plateaus rather than a surface.
 
 ## `mania_surface_2d.py` — static overview, PNG
 
-Four panels over the whole (difficulty, skill) plane at fixed windows. Usually the
+Four panels over the whole (difficulty, sigma) plane at fixed windows. Usually the
 better starting point, since the 3D view is one difficulty slice.
 
 ```sh
-tools/mania_surface_2d.py --fit-skill 10.305 --target-accuracy 0.91672
+tools/mania_surface_2d.py --fit-sigma 10.305 --target-accuracy 0.91672
 tools/mania_surface_2d.py --map 5088628 --fetch
 ```
 
