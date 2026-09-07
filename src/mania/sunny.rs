@@ -23,7 +23,8 @@ use rosu_mods::{Acronym, GameMods};
 
 use crate::mania::sunny_accuracy::{
     ErrorModel, JudgementUnit, LN_DURATION_BUCKETS, TIMING_BASELINE_SIGMA,
-    expected_counts_at_core_sigma, ln_sigma_scale_for_duration, sigma_scale_from_difficulty,
+    expected_counts_at_core_sigma, ln_sigma_scale_for_duration,
+    sigma_scale_from_difficulty_ratio, sr_to_base_sigma_scale,
 };
 use crate::mania::sunny_windows::{ManiaHitWindows, hit_windows};
 
@@ -669,6 +670,16 @@ pub struct SunnyManiaDifficultyAttributes {
     /// - High OD with complex LN → ~1.05-1.15 (harder to acc)
     /// - Typical maps → ~1.0
     pub timing_difficulty_factor: f64,
+    /// Map-level base timing sigma derived from SR.
+    ///
+    /// This scales TIMING_BASELINE_SIGMA (11ms) by the map's overall difficulty (SR),
+    /// applied once per map rather than per operation. Represents the player's baseline
+    /// timing precision when approaching this map's difficulty level.
+    ///
+    /// The input state simulation operates on this base, applying pure state-dependent
+    /// factors (gap recovery, coordination load, pattern type) without circular SR
+    /// dependency.
+    pub base_timing_sigma: f64,
 }
 
 /// The result of the sunny performance calculation.
@@ -764,6 +775,9 @@ pub fn calculate(
     let data = RebirthData::new_with_windows(notes, total_columns, windows);
     let params = calculate_from_data(&data, classic)?;
 
+    // Compute base sigma from SR (once per map, outside simulation)
+    let base_timing_sigma = TIMING_BASELINE_SIGMA * sr_to_base_sigma_scale(params.sr);
+
     let mut attrs = SunnyManiaDifficultyAttributes {
         stars: params.sr,
         variety: params.variety,
@@ -784,6 +798,7 @@ pub fn calculate(
         timing_reference_accuracy: 1.0,
         ln_judged_as_one: classic,
         timing_difficulty_factor: 1.0,
+        base_timing_sigma,
     };
 
     let model = ErrorModel::default();
@@ -906,9 +921,9 @@ fn compute_per_judgement_timing_adjustment(
         };
     }
 
-    // Get expected counts at baseline sigma (same as SR phase uses)
+    // Get expected counts at map's base timing sigma (SR-scaled baseline)
     let expected =
-        expected_counts_at_core_sigma(units, &attrs.hit_windows, model, TIMING_BASELINE_SIGMA);
+        expected_counts_at_core_sigma(units, &attrs.hit_windows, model, attrs.base_timing_sigma);
     let expected_arr = expected.as_array();
 
     // Player actual counts
@@ -1005,7 +1020,7 @@ fn calculate_performance_inner(
     let xxy_variety_multiplier = xxy_variety_multiplier(attrs.variety);
     let xxy_length_multiplier = xxy_length_multiplier(attrs.n_objects as f64, attrs.stars);
     let xxy_acc_multiplier = xxy_acc_multiplier(score_accuracy, attrs.acc_scalar);
-    let score_performance_proportion = xxy_performance_proportion(score_accuracy);
+    let xxy_pattern_pp_proportion = xxy_performance_proportion(score_accuracy);
     // Accuracy-neutral pattern value. Keeping this separate makes the accuracy
     // reward replaceable without rebuilding Sunny's pattern calculation.
     let xxy_pattern_difficulty = attrs.stars.max(0.2) - 0.15;
@@ -1017,8 +1032,7 @@ fn calculate_performance_inner(
 
     // Express Sunny's multiplicative accuracy pricing as an additive delta so
     // it can be inspected independently from the timing surface.
-    let xxy_pp_accuracy =
-        xxy_pp_pattern * (score_performance_proportion * xxy_acc_multiplier - 1.0);
+    let xxy_pp_accuracy = xxy_pp_pattern * (xxy_pattern_pp_proportion * xxy_acc_multiplier - 1.0);
 
     // Timing difficulty: Multi-sigma approach
     // For each judgement type, find implied sigma, then aggregate with asymmetric penalties.
@@ -1037,7 +1051,7 @@ fn calculate_performance_inner(
                 pp_timing: 0.0,
                 timing_expected_accuracy: 1.0,
                 timing_reference_accuracy: 1.0,
-                timing_core_sigma: TIMING_BASELINE_SIGMA,
+                timing_core_sigma: attrs.base_timing_sigma,
                 variety_multiplier: xxy_variety_multiplier,
                 acc_multiplier: 1.0,
                 length_multiplier: xxy_length_multiplier,
@@ -1052,7 +1066,7 @@ fn calculate_performance_inner(
     }
 
     // Get judgement units with input-state effects
-    let _units = judgement_units(attrs, total_hits, model, !per_note_difficulty_disabled());
+    let units = judgement_units(attrs, total_hits, model, !per_note_difficulty_disabled());
 
     let xxy_pp = xxy_pp_pattern + xxy_pp_accuracy;
 
@@ -1062,7 +1076,7 @@ fn calculate_performance_inner(
 
     // 2. Score-based adjustment: per-judgement loss analysis
     // Compare player's judgement distribution to expected baseline
-    let timing_debug = compute_per_judgement_timing_adjustment(state, attrs, &_units, model);
+    let timing_debug = compute_per_judgement_timing_adjustment(state, attrs, &units, model);
     let score_timing_adjustment = timing_debug.multiplier;
 
     // Combine both factors
@@ -1083,7 +1097,7 @@ fn calculate_performance_inner(
 
         timing_expected_accuracy: attrs.timing_expected_accuracy,
         timing_reference_accuracy: attrs.timing_reference_accuracy,
-        timing_core_sigma: TIMING_BASELINE_SIGMA, // Baseline used in map difficulty calculation
+        timing_core_sigma: attrs.base_timing_sigma, // SR-scaled baseline used in map difficulty calculation
 
         variety_multiplier: xxy_variety_multiplier,
         acc_multiplier: timing_multiplier, // Combined: map factor × score adjustment
@@ -1457,10 +1471,11 @@ fn units_from_input_state_bins(
                 f64::from(plain_count) * per_operation,
             );
             unit.fading_mean_offset = class_offset;
-            // Apply gap-based sigma scaling
-            let effective_difficulty = bin.mean_difficulty / reference_difficulty * attrs.stars;
-            unit.sigma_scale = sigma_scale_from_difficulty(effective_difficulty)
-                * model.sigma_scale_from_gap(bin.mean_gap_ms);
+            // Pure state-dependent sigma scaling (no SR dependency)
+            unit.sigma_scale = sigma_scale_from_difficulty_ratio(
+                bin.mean_difficulty,
+                reference_difficulty,
+            ) * model.sigma_scale_from_gap(bin.mean_gap_ms);
             units.push(unit);
         }
 
@@ -1472,10 +1487,11 @@ fn units_from_input_state_bins(
                 bin.mean_duration_ms,
             );
             unit.fading_mean_offset = class_offset;
-            // Apply gap-based sigma scaling
-            let effective_difficulty = bin.mean_difficulty / reference_difficulty * attrs.stars;
-            unit.sigma_scale = sigma_scale_from_difficulty(effective_difficulty)
-                * ln_sigma_scale_for_duration(model, bin.mean_duration_ms)
+            // Pure state-dependent sigma scaling (no SR dependency)
+            unit.sigma_scale = sigma_scale_from_difficulty_ratio(
+                bin.mean_difficulty,
+                reference_difficulty,
+            ) * ln_sigma_scale_for_duration(model, bin.mean_duration_ms)
                 * model.sigma_scale_from_gap(bin.mean_gap_ms);
             units.push(unit);
         }
@@ -1535,8 +1551,9 @@ fn units_from_difficulty_bins(
         if bin.rice > 0 {
             units.push(
                 JudgementUnit::repeated(bin.difficulty, f64::from(bin.rice) * per_note)
-                    .with_sigma_scale(sigma_scale_from_difficulty(
-                        bin.difficulty / reference_difficulty * attrs.stars,
+                    .with_sigma_scale(sigma_scale_from_difficulty_ratio(
+                        bin.difficulty,
+                        reference_difficulty,
                     )),
             );
         }
@@ -1551,16 +1568,18 @@ fn units_from_difficulty_bins(
             units.push(
                 JudgementUnit::long_note(bin.difficulty, weight, model, bin.mean_duration)
                     .with_sigma_scale(
-                        sigma_scale_from_difficulty(
-                            bin.difficulty / reference_difficulty * attrs.stars,
+                        sigma_scale_from_difficulty_ratio(
+                            bin.difficulty,
+                            reference_difficulty,
                         ) * ln_sigma_scale_for_duration(model, bin.mean_duration),
                     ),
             );
         } else {
             units.push(
                 JudgementUnit::repeated(bin.difficulty, weight).with_sigma_scale(
-                    sigma_scale_from_difficulty(
-                        bin.difficulty / reference_difficulty * attrs.stars,
+                    sigma_scale_from_difficulty_ratio(
+                        bin.difficulty,
+                        reference_difficulty,
                     ),
                 ),
             );
@@ -1588,7 +1607,7 @@ fn compute_timing_pp_with_units(
         return TimingPpResult {
             expected_accuracy: 1.0,
             reference_accuracy: 1.0,
-            core_sigma: TIMING_BASELINE_SIGMA,
+            core_sigma: attrs.base_timing_sigma,
             ..TimingPpResult::default()
         };
     }
@@ -1602,14 +1621,14 @@ fn compute_timing_pp_with_units(
         &owned_units
     };
 
-    // Use the baseline timing precision to compute what accuracy it would produce
+    // Use the map's base timing sigma (SR-scaled baseline) to compute expected accuracy
     // through the played windows and input-state conditions.
     let expected =
-        expected_counts_at_core_sigma(units, &attrs.hit_windows, model, TIMING_BASELINE_SIGMA);
+        expected_counts_at_core_sigma(units, &attrs.hit_windows, model, attrs.base_timing_sigma);
     let expected_accuracy = expected.custom_accuracy();
     // let expected_loss = (1.0 - expected_accuracy).max(f64::EPSILON);
 
-    // Reference: same baseline precision through neutral conditions (no input-state offsets).
+    // Reference: same base sigma through neutral conditions (no input-state offsets).
     let reference_model = ErrorModel {
         recovery_offset: 0.0,
         anticipation_offset: 0.0,
@@ -1625,7 +1644,7 @@ fn compute_timing_pp_with_units(
         &reference_units,
         &attrs.hit_windows,
         &reference_model,
-        TIMING_BASELINE_SIGMA,
+        attrs.base_timing_sigma,
     );
     let reference_accuracy = reference.custom_accuracy();
     // let reference_loss = (1.0 - reference_accuracy).max(f64::EPSILON);
@@ -1633,7 +1652,7 @@ fn compute_timing_pp_with_units(
     TimingPpResult {
         expected_accuracy,
         reference_accuracy,
-        core_sigma: TIMING_BASELINE_SIGMA,
+        core_sigma: attrs.base_timing_sigma,
     }
 }
 

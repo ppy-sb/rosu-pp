@@ -1292,6 +1292,18 @@ pub fn sigma_scale_from_difficulty(difficulty: f64) -> f64 {
     sigma_scale_from_difficulty_ratio(difficulty, TIMING_DIFFICULTY_REFERENCE)
 }
 
+/// Map-level sigma scaling from SR.
+///
+/// Converts the map's star rating into a multiplier for TIMING_BASELINE_SIGMA,
+/// representing how the player's baseline timing precision changes with overall
+/// map difficulty. Applied once per map, not per operation.
+///
+/// Uses the same power-law structure as sigma_scale_from_difficulty_ratio but
+/// operates on SR rather than local difficulty values.
+pub fn sr_to_base_sigma_scale(sr: f64) -> f64 {
+    sigma_scale_from_difficulty_ratio(sr, TIMING_DIFFICULTY_REFERENCE)
+}
+
 impl JudgementUnit {
     /// A single judgement of the given local difficulty.
     pub fn new(difficulty: f64) -> Self {
