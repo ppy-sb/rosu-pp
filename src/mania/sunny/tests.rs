@@ -13,7 +13,7 @@ mod sigma_gap_fit;
 
 fn create_table() -> Table {
     let mut table = Table::new();
-    table.load_preset(comfy_table::presets::UTF8_FULL_CONDENSED);
+    table.load_style(comfy_table::presets::UTF8_FULL_CONDENSED.with_rounded_corners());
     table.set_content_arrangement(ContentArrangement::Dynamic);
     table
 }

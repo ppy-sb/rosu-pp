@@ -247,7 +247,7 @@ pub fn per_note_difficulty(difficulty: &Difficulty, map: &Beatmap) -> Option<Vec
 
 /// Calculates the per-corner difficulty values (d_all).
 /// Extracted from calculate_from_data to allow reuse for per-note difficulty.
-fn calculate_d_all(data: &RebirthData, classic: bool) -> Vec<f64> {
+fn calculate_d_all(data: &RebirthData, _classic: bool) -> Vec<f64> {
     let key_usage = get_key_usage(data);
     let active_columns: Vec<_> = (0..data.base_corners.len())
         .map(|idx| {
