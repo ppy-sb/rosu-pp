@@ -4,17 +4,14 @@
 
 multi user report
 ```bash
-SUNNY_MULTIUSER_TSV=local-fixtures/bp-21207706.tsv \
-SUNNY_MAPS=local-fixtures/bp-21207706/maps \
-cargo test --release --lib multiuser_report -- \
-  --ignored --nocapture --exact mania::sunny::tests::multiuser_report
+cargo run --release --features reports --bin multiuser_report -- \
+  --tsv local-fixtures/bp-21207706.tsv \
+  --maps local-fixtures/bp-21207706/maps
 
-Both variables are optional:
+Both arguments are optional:
 
-- SUNNY_MULTIUSER_TSV defaults to local-fixtures/multiuser.tsv
-- SUNNY_MAPS defaults to local-fixtures/maps
-
-Verified successfully against the 100-score BP fixture. Changes are in src/mania/sunny/tests.rs.
+- --tsv defaults to local-fixtures/multiuser.tsv
+- --maps defaults to local-fixtures/maps
 ```
 
 surface diff preview

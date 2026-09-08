@@ -1,3 +1,4 @@
+use clap::Parser;
 use rosu_mods::GameMod;
 use rosu_pp::mania::sunny::{judgement_units, per_note_difficulty};
 use rosu_pp::mania::sunny_accuracy::{
@@ -8,6 +9,31 @@ use rosu_pp::mania::sunny_windows::{ManiaHitWindows, ManiaJudgement};
 use rosu_pp::report_utils::{calculate, parse, single_mod};
 use rosu_pp::{Difficulty, GameMods};
 use std::fmt::Write as _;
+use std::path::PathBuf;
+
+#[derive(Parser)]
+#[command(name = "surface_dump")]
+#[command(about = "Generates CSV data for visualizing the accuracy surface")]
+struct Args {
+    /// Path to .osu file (optional, defaults to synthetic Decoy slice)
+    #[arg(long)]
+    map: Option<PathBuf>,
+
+    /// Clock rate multiplier
+    #[arg(long, default_value = "1.0")]
+    clock_rate: f64,
+
+    /// Core timing spread for per-note overlay (ms)
+    #[arg(long)]
+    core_sigma: Option<f64>,
+
+    /// Comma-separated sigma values to sample
+    #[arg(long, value_delimiter = ',')]
+    sigmas: Vec<f64>,
+    /// Directory for generated CSV data. Defaults to a temporary directory.
+    #[arg(long, default_value = "target/surface", env = "SURFACE_DATA_DIR")]
+    data_dir: PathBuf,
+}
 
 const REFERENCE_WINDOWS: ManiaHitWindows = ManiaHitWindows {
     perfect: 16.5,
@@ -19,24 +45,27 @@ const REFERENCE_WINDOWS: ManiaHitWindows = ManiaHitWindows {
 };
 
 fn main() {
+    let args = Args::parse();
     let model = ErrorModel::default();
-    let dir = std::path::Path::new("target/surface");
-    std::fs::create_dir_all(dir).unwrap();
-
-    let env = |key: &str| std::env::var(key).ok().filter(|value| !value.is_empty());
-    let clock_rate = env("SURFACE_CLOCK_RATE")
-        .and_then(|value| value.parse::<f64>().ok())
-        .unwrap_or(1.0);
+    let dir = args.data_dir;
+    std::fs::create_dir_all(&dir).unwrap();
 
     // A real map supplies the slice difficulty, judgement-unit population, and
     // actual NM/EZ/HR windows. With no map, preserve the reproducible synthetic
     // Decoy slice used by the original visualiser.
-    let map_slice = env("SURFACE_MAP").map(|path| {
-        let map = parse(&path).unwrap_or_else(|| panic!("cannot parse {path}"));
-        let attrs = calculate(&map, &GameMods::default(), clock_rate, Some(true), None)
-            .unwrap_or_else(|| panic!("{path} is not a mania map"));
+    let map_slice = args.map.as_ref().map(|path| {
+        let map = parse(&path.to_string_lossy())
+            .unwrap_or_else(|| panic!("cannot parse {}", path.display()));
+        let attrs = calculate(
+            &map,
+            &GameMods::default(),
+            args.clock_rate,
+            Some(true),
+            None,
+        )
+        .unwrap_or_else(|| panic!("{} is not a mania map", path.display()));
 
-        (path, map, attrs)
+        (path.to_string_lossy().to_string(), map, attrs)
     });
 
     // Log-spaced in both axes: skill spans orders of magnitude and difficulty is
@@ -52,25 +81,25 @@ fn main() {
 
     let difficulties = geom(2.0, 20.0, 121);
 
-    // Sigma values can be overridden via SURFACE_SIGMAS env var (comma-separated)
-    let sigmas: Vec<f64> = env("SURFACE_SIGMAS")
-        .map(|s| s.split(',').filter_map(|v| v.trim().parse().ok()).collect())
-        .unwrap_or_else(|| {
-            // Default: map skill range to sigma range for backward compatibility
-            let skills = geom(0.5, 60.0, 161);
-            skills
-                .iter()
-                .map(|&s| {
-                    // Map skill range [0.5, 60] to sigma range [30, 5] (inverse relationship)
-                    // Higher skill -> lower sigma (tighter timing)
-                    let log_skill = s.ln();
-                    let log_min = 0.5_f64.ln();
-                    let log_max = 60.0_f64.ln();
-                    let t = (log_skill - log_min) / (log_max - log_min);
-                    30.0 * (5.0_f64 / 30.0).powf(t.clamp(0.0, 1.0))
-                })
-                .collect()
-        });
+    // Use provided sigmas or default sigma calculation
+    let sigmas: Vec<f64> = if !args.sigmas.is_empty() {
+        args.sigmas.clone()
+    } else {
+        // Default: map skill range to sigma range for backward compatibility
+        let skills = geom(0.5, 60.0, 161);
+        skills
+            .iter()
+            .map(|&s| {
+                // Map skill range [0.5, 60] to sigma range [30, 5] (inverse relationship)
+                // Higher skill -> lower sigma (tighter timing)
+                let log_skill = s.ln();
+                let log_min = 0.5_f64.ln();
+                let log_max = 60.0_f64.ln();
+                let t = (log_skill - log_min) / (log_max - log_min);
+                30.0 * (5.0_f64 / 30.0).powf(t.clamp(0.0, 1.0))
+            })
+            .collect()
+    };
 
     let mut grid = String::from("difficulty,sigma,accuracy,miss_rate\n");
 
@@ -100,15 +129,16 @@ fn main() {
         .as_ref()
         .map(|(_, _, attrs)| judgement_units(attrs, 1.0, &model, true))
         .unwrap_or_else(|| vec![JudgementUnit::new(map_difficulty)]);
-    let core_sigma = env("SURFACE_CORE_SIGMA")
-        .and_then(|value| value.parse::<f64>().ok())
+    let core_sigma = args
+        .core_sigma
         .filter(|sigma| sigma.is_finite() && *sigma > 0.0)
         .unwrap_or(TIMING_BASELINE_SIGMA);
 
     std::fs::write(
         dir.join("surface_2d_meta.csv"),
         format!(
-            "difficulty,clock_rate,core_sigma,source\n{map_difficulty},{clock_rate},{core_sigma},{source}\n"
+            "difficulty,clock_rate,core_sigma,source\n{map_difficulty},{},{core_sigma},{source}\n",
+            args.clock_rate
         ),
     )
     .unwrap();
@@ -263,8 +293,8 @@ fn main() {
     let window_sets = if let Some((_, map, attrs)) = &map_slice {
         let hr_mods = single_mod(GameMod::HardRockMania(Default::default()));
         let ez_mods = single_mod(GameMod::EasyMania(Default::default()));
-        let hr_attrs = calculate(map, &hr_mods, clock_rate, Some(true), None).unwrap();
-        let ez_attrs = calculate(map, &ez_mods, clock_rate, Some(true), None).unwrap();
+        let hr_attrs = calculate(map, &hr_mods, args.clock_rate, Some(true), None).unwrap();
+        let ez_attrs = calculate(map, &ez_mods, args.clock_rate, Some(true), None).unwrap();
 
         vec![
             ("HR", hr_attrs.hit_windows.great),

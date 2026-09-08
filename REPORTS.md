@@ -36,25 +36,26 @@ Analyzes score data from real players to validate the algorithm against producti
 
 **Input**: TSV file with columns: uid, map_id, mods, stars, keys, counts (320/300/200/100/50/miss), accuracy, live_pp, title, version
 
-**Output**: Console table comparing:
-- Live PP (from production)
-- Rebirth PP (historical)
-- Current PP (experimental)
+TSV/CSV rows include beatmap metadata (`map`, `artist`, `title`, `diff`) followed by mods, score state, and calculated PP fields.
 
-**Run as test**:
+**Run**:
 ```bash
-cargo test --release --lib --features reports \
-  mania::sunny::tests::multiuser_report -- \
-  --ignored --nocapture --exact
+cargo run --release --features reports --bin multiuser_report -- \
+  --tsv local-fixtures/multiuser.tsv \
+  --maps local-fixtures/maps
 ```
 
-**Environment variables**:
-- `SUNNY_MULTIUSER_TSV`: Path to multiuser TSV file (default: `local-fixtures/multiuser.tsv`)
-- `SUNNY_MAPS`: Directory containing .osu map files (default: `local-fixtures/maps`)
+**Arguments**:
+- `--tsv`: Path to multiuser TSV file (default: `local-fixtures/multiuser.tsv`)
+- `--maps`: Directory containing .osu map files (default: `local-fixtures/maps`)
+- `--output-format`: `text` (default), `tsv`, or `csv`. TSV/CSV emit machine-readable score rows only.
 
-**Binary wrapper**:
+Both arguments are optional and will use defaults if not specified.
+
+Example machine-readable output:
 ```bash
-cargo run --release --features reports --bin multiuser_report
+cargo run --release --features reports --bin multiuser_report -- \
+  --output-format=csv > report.csv
 ```
 
 ### 2. Surface Dump (2D Visualization)
@@ -70,31 +71,23 @@ Generates CSV data for visualizing the accuracy surface over (difficulty, sigma)
 - `per_note_difficulty.csv`: Per-note difficulty values (if map provided)
 - `per_note_expected_counts.csv`: Expected judgments per note (if map provided)
 
-**Run as test**:
-```bash
-cargo test --release --lib --features reports \
-  mania::sunny::tests::surface_dump -- \
-  --ignored --nocapture --exact
-```
-
-**Environment variables**:
-- `SURFACE_MAP`: Path to .osu file (optional, defaults to synthetic Decoy slice)
-- `SURFACE_CLOCK_RATE`: Clock rate multiplier (default: 1.0)
-- `SURFACE_CORE_SIGMA`: Core timing spread for per-note overlay (default: TIMING_BASELINE_SIGMA)
-- `SURFACE_SIGMAS`: Comma-separated sigma values to sample (optional)
-
-**Binary wrapper**:
+**Run**:
 ```bash
 cargo run --release --features reports --bin surface_dump
 ```
 
+**Arguments**:
+- `--map`: Path to .osu file (optional, defaults to synthetic Decoy slice)
+- `--clock-rate`: Clock rate multiplier (default: 1.0)
+- `--core-sigma`: Core timing spread for per-note overlay in ms (optional, defaults to TIMING_BASELINE_SIGMA)
+- `--sigmas`: Comma-separated sigma values to sample (optional)
+
 **Example with custom map**:
 ```bash
-SURFACE_MAP=local-fixtures/maps/12345.osu \
-SURFACE_CLOCK_RATE=1.5 \
-cargo test --release --lib --features reports \
-  mania::sunny::tests::surface_dump -- \
-  --ignored --nocapture --exact
+cargo run --release --features reports --bin surface_dump -- \
+  --map local-fixtures/maps/12345.osu \
+  --clock-rate 1.5 \
+  --core-sigma 15.0
 ```
 
 ## Struct Fields Affected

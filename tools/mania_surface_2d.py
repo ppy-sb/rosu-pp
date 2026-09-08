@@ -23,8 +23,8 @@ Usage
     tools/mania_surface_2d.py
     tools/mania_surface_2d.py --map path/to.osu --out /tmp/surface.png
 
-Requires `matplotlib` and `numpy`. Data comes from the `surface_dump` test in
-`src/mania/sunny/tests.rs`, which this script invokes via `cargo test`.
+Requires `matplotlib` and `numpy`. Data comes from the `surface_dump` binary,
+which this script invokes via `cargo run`.
 """
 
 from __future__ import annotations
@@ -88,34 +88,33 @@ def read(name: str) -> list[dict]:
 
 
 def dump(args: argparse.Namespace) -> None:
-    # `--exact`: the bare name also substring-matches `od_surface_dump`, which would
-    # clobber that tool's CSV with a default-parameter dump as a side effect.
+    global DATA
+    DATA = args.data_dir
     command = [
         "cargo",
-        "test",
+        "run",
         "--release",
-        "--lib",
-        "mania::sunny::tests::surface_dump",
+        "--bin",
+        "surface_dump",
+        "--features",
+        "reports",
         "--",
-        "--ignored",
-        "--exact",
-        "--nocapture",
+        "--data-dir",
+        str(args.data_dir),
+        "--clock-rate",
+        str(args.clock_rate),
+        "--sigmas",
+        ",".join(str(x) for x in SIGMA_TICKS),
     ]
-    print("$", " ".join(command))
-    env = dict(os.environ)
-    # The per-note overlay is evaluated at the requested core sigma. Clear any
-    # inherited value when the option is omitted so each dump is deterministic.
-    env.pop("SURFACE_CORE_SIGMA", None)
     if args.map:
-        env["SURFACE_MAP"] = str(args.map)
-    env["SURFACE_CLOCK_RATE"] = str(args.clock_rate)
-    env["SURFACE_SIGMAS"] = ",".join(str(x) for x in SIGMA_TICKS)
+        command.extend(["--map", str(args.map)])
     if args.fit_sigma is not None:
-        env["SURFACE_CORE_SIGMA"] = str(args.fit_sigma)
-    result = subprocess.run(command, cwd=ROOT, env=env, check=False)
+        command.extend(["--core-sigma", str(args.fit_sigma)])
+    print("$", " ".join(command))
+    result = subprocess.run(command, cwd=ROOT, check=False)
 
     if result.returncode != 0:
-        sys.exit(f"cargo test failed with status {result.returncode}")
+        sys.exit(f"cargo run failed with status {result.returncode}")
 
 
 def fetch_map(path: Path) -> Path:
@@ -479,12 +478,23 @@ def main() -> None:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--out", type=Path, default=DATA / "mania_surface_2d.png")
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=Path(os.environ.get("TMPDIR", "/tmp")) / "rosu-pp-surface",
+        help="directory for temporary CSV data (default: a directory under TMPDIR)",
+    )
     parser.add_argument(
         "--map",
         type=Path,
         required=True,
         help="beatmap supplying difficulty, windows, and note units",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=Path(os.environ.get("TMPDIR", "/tmp")) / "mania_surface_2d.png",
+        help="PNG output path",
     )
     parser.add_argument(
         "--fetch",
@@ -510,6 +520,9 @@ def main() -> None:
 
     if args.fit_sigma is not None and (not np.isfinite(args.fit_sigma) or args.fit_sigma <= 0.0):
         parser.error("--fit-sigma must be a finite, positive number")
+
+    args.data_dir = args.data_dir.resolve()
+    DATA = args.data_dir
 
     if args.fetch:
         args.map = fetch_map(args.map)
