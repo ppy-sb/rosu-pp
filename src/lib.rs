@@ -174,6 +174,10 @@ pub use self::{
 #[macro_use]
 mod util;
 
+// Report utilities - only available with reports feature
+#[cfg(feature = "reports")]
+pub mod report_utils;
+
 /// Types for calculations of any mode.
 pub mod any;
 

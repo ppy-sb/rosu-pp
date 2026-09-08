@@ -1,6 +1,6 @@
-use rosu_mods::GameMods;
 /// Test the timing-based PP modifier in the sunny system
 use rosu_pp::Beatmap;
+use rosu_pp::GameMods;
 use rosu_pp::mania::sunny::{SunnyScoreState, calculate, calculate_performance};
 
 #[test]

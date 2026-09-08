@@ -204,6 +204,96 @@ pub fn is_classic(difficulty: &Difficulty) -> bool {
     (!difficulty.get_lazer() && !difficulty.get_mods().sv2()) || difficulty.get_mods().cl()
 }
 
+/// Returns per-note difficulty values for each hit object in the map.
+///
+/// Each note returns `(difficulty, hold_duration_ms)` where `hold_duration_ms`
+/// is `None` for rice notes and `Some(duration)` for long notes.
+///
+/// Returns `None` if the map has fewer than 2 notes or invalid column count.
+#[cfg(any(test, feature = "reports"))]
+pub fn per_note_difficulty(difficulty: &Difficulty, map: &Beatmap) -> Option<Vec<(f64, Option<f64>)>> {
+    let total_columns = map.cs.round_ties_even().max(1.0) as usize;
+    let clock_rate = difficulty.get_clock_rate();
+    let classic = is_classic(difficulty);
+    let mut params = ObjectParams::new(map);
+    let objects = map
+        .hit_objects
+        .iter()
+        .map(|h| ManiaObject::new(h, total_columns as f32, &mut params));
+
+    let data = prepare_data(
+        total_columns,
+        map.od,
+        map.is_convert,
+        clock_rate,
+        classic,
+        difficulty.get_mods(),
+        objects,
+    )?;
+
+    let d_all = calculate_d_all(&data, classic);
+
+    let per_note = data
+        .notes
+        .iter()
+        .map(|note| {
+            let idx = lower_bound(&data.all_corners, note.head).min(data.all_corners.len() - 1);
+            (d_all[idx], note.tail.map(|tail| tail - note.head))
+        })
+        .collect();
+
+    Some(per_note)
+}
+
+/// Calculates the per-corner difficulty values (d_all).
+/// Extracted from calculate_from_data to allow reuse for per-note difficulty.
+fn calculate_d_all(data: &RebirthData, classic: bool) -> Vec<f64> {
+    let key_usage = get_key_usage(data);
+    let active_columns: Vec<_> = (0..data.base_corners.len())
+        .map(|idx| {
+            (0..data.total_columns)
+                .filter(|&column| key_usage[column][idx])
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let key_usage_400 = get_key_usage_400(data);
+    let anchor = compute_anchor(&key_usage_400);
+    let (delta_by_column, jbar_base) = compute_jbar(data);
+    let jbar = interp_values(&data.all_corners, &data.base_corners, &jbar_base);
+    let xbar_base = compute_xbar(data, &active_columns);
+    let xbar = interp_values(&data.all_corners, &data.base_corners, &xbar_base);
+    let ln_rep = LongNoteBodyRepresentation::new(&data.long_notes, data.t_end);
+    let pbar_base = compute_pbar(data, &ln_rep, &anchor);
+    let pbar = interp_values(&data.all_corners, &data.base_corners, &pbar_base);
+    let abar_awkwardness = compute_abar(data, &active_columns, &delta_by_column);
+    let abar = interp_values(
+        &data.all_corners,
+        &data.awkwardness_corners,
+        &abar_awkwardness,
+    );
+    let rbar_base = compute_rbar(data);
+    let rbar = interp_values(&data.all_corners, &data.base_corners, &rbar_base);
+    let (density_base, _density_v2_base, keys_base) = compute_density_and_keys(data, &key_usage);
+    let density = step_interp(&data.all_corners, &data.base_corners, &density_base);
+    let keys = step_interp(&data.all_corners, &data.base_corners, &keys_base);
+
+    (0..data.all_corners.len())
+        .map(|idx| {
+            let s_all = (0.4
+                * (abar[idx].powf(3.0 / keys[idx]) * jbar[idx].min(8.0 + 0.85 * jbar[idx]))
+                    .powf(1.5)
+                + (1.0 - 0.4)
+                    * (abar[idx].powf(2.0 / 3.0)
+                        * (0.8 * pbar[idx] + rbar[idx] * 35.0 / (density[idx] + 8.0)))
+                        .powf(1.5))
+            .powf(2.0 / 3.0);
+            let t_all = (abar[idx].powf(3.0 / keys[idx]) * xbar[idx]) / (xbar[idx] + s_all + 1.0);
+
+            2.7 * s_all.powf(0.5) * t_all.powf(1.5) + s_all * 0.27
+        })
+        .collect()
+}
+
 fn prepare_data(
     total_columns: usize,
     od: f32,
@@ -685,51 +775,13 @@ fn compute_density_and_keys(
 }
 
 fn calculate_from_data(data: RebirthData, classic: bool) -> RebirthParams {
+    let d_all = calculate_d_all(&data, classic);
+
     let key_usage = get_key_usage(&data);
-    let active_columns: Vec<_> = (0..data.base_corners.len())
-        .map(|idx| {
-            (0..data.total_columns)
-                .filter(|&column| key_usage[column][idx])
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    let key_usage_400 = get_key_usage_400(&data);
-    let anchor = compute_anchor(&key_usage_400);
-    let (delta_by_column, jbar_base) = compute_jbar(&data);
-    let jbar = interp_values(&data.all_corners, &data.base_corners, &jbar_base);
-    let xbar_base = compute_xbar(&data, &active_columns);
-    let xbar = interp_values(&data.all_corners, &data.base_corners, &xbar_base);
-    let ln_rep = LongNoteBodyRepresentation::new(&data.long_notes, data.t_end);
-    let pbar_base = compute_pbar(&data, &ln_rep, &anchor);
-    let pbar = interp_values(&data.all_corners, &data.base_corners, &pbar_base);
-    let abar_awkwardness = compute_abar(&data, &active_columns, &delta_by_column);
-    let abar = interp_values(
-        &data.all_corners,
-        &data.awkwardness_corners,
-        &abar_awkwardness,
-    );
-    let rbar_base = compute_rbar(&data);
-    let rbar = interp_values(&data.all_corners, &data.base_corners, &rbar_base);
     let (density_base, density_v2_base, keys_base) = compute_density_and_keys(&data, &key_usage);
     let density = step_interp(&data.all_corners, &data.base_corners, &density_base);
     let density_v2 = step_interp(&data.all_corners, &data.base_corners, &density_v2_base);
     let keys = step_interp(&data.all_corners, &data.base_corners, &keys_base);
-
-    let d_all: Vec<_> = (0..data.all_corners.len())
-        .map(|idx| {
-            let s_all = (0.4
-                * (abar[idx].powf(3.0 / keys[idx]) * jbar[idx].min(8.0 + 0.85 * jbar[idx]))
-                    .powf(1.5)
-                + (1.0 - 0.4)
-                    * (abar[idx].powf(2.0 / 3.0)
-                        * (0.8 * pbar[idx] + rbar[idx] * 35.0 / (density[idx] + 8.0)))
-                        .powf(1.5))
-            .powf(2.0 / 3.0);
-            let t_all = (abar[idx].powf(3.0 / keys[idx]) * xbar[idx]) / (xbar[idx] + s_all + 1.0);
-
-            2.7 * s_all.powf(0.5) * t_all.powf(1.5) + s_all * 0.27
-        })
-        .collect();
 
     let mut gaps = vec![0.0; data.all_corners.len()];
 

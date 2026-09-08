@@ -28,6 +28,10 @@ mod rebirth;
 pub(crate) mod shared;
 mod skills;
 
+// Re-export per_note_difficulty for reports
+#[cfg(any(test, feature = "reports"))]
+pub use rebirth::per_note_difficulty;
+
 pub fn difficulty(
     difficulty: &Difficulty,
     map: &Beatmap,

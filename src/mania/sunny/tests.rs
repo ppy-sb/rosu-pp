@@ -769,11 +769,11 @@ fn ez_hr_affect_star_rating() {
 
     let mut hr_mods = LazerMods::new();
     single_mod(&mut hr_mods, GameMod::HardRockMania(Default::default()));
-    let hr = calculate(&map, &hr_mods, 1.0, Some(true), None).unwrap();
+    let hr = calculate(&map, &GameMods::from(hr_mods), 1.0, Some(true), None).unwrap();
 
     let mut ez_mods = LazerMods::new();
     single_mod(&mut ez_mods, GameMod::EasyMania(Default::default()));
-    let ez = calculate(&map, &ez_mods, 1.0, Some(true), None).unwrap();
+    let ez = calculate(&map, &GameMods::from(ez_mods), 1.0, Some(true), None).unwrap();
 
     assert!(
         ez.stars < nm.stars && nm.stars < hr.stars,
@@ -816,7 +816,7 @@ fn performance_formula() {
     // says nothing about.
     let mut nf_mods = LazerMods::new();
     single_mod(&mut nf_mods, GameMod::NoFailMania(Default::default()));
-    let perf_nf = calculate_performance(&attrs, &nf_mods, state);
+    let perf_nf = calculate_performance(&attrs, &GameMods::from(nf_mods), state);
     assert!((perf_nf.pp - perf.pp * 0.75).abs() < 1e-6);
 }
 
@@ -829,8 +829,9 @@ fn ez_is_priced_by_the_windows_not_a_multiplier() {
     let map = synthetic_map(8.0, 900, 125.0);
     let nm_mods = GameMods::default();
 
-    let mut ez_mods = LazerMods::new();
-    single_mod(&mut ez_mods, GameMod::EasyMania(Default::default()));
+    let mut ez_mods_inner = LazerMods::new();
+    single_mod(&mut ez_mods_inner, GameMod::EasyMania(Default::default()));
+    let ez_mods = GameMods::from(ez_mods_inner);
 
     let nm = calculate(&map, &nm_mods, 1.0, Some(true), None).unwrap();
     let ez = calculate(&map, &ez_mods, 1.0, Some(true), None).unwrap();
@@ -910,8 +911,12 @@ fn hr_is_rewarded_by_the_same_mechanism() {
     let map = synthetic_map(8.0, 900, 125.0);
     let nm_mods = GameMods::default();
 
-    let mut hr_mods = LazerMods::new();
-    single_mod(&mut hr_mods, GameMod::HardRockMania(Default::default()));
+    let mut hr_mods_inner = LazerMods::new();
+    single_mod(
+        &mut hr_mods_inner,
+        GameMod::HardRockMania(Default::default()),
+    );
+    let hr_mods = GameMods::from(hr_mods_inner);
 
     let nm = calculate(&map, &nm_mods, 1.0, Some(true), None).unwrap();
     let hr = calculate(&map, &hr_mods, 1.0, Some(true), None).unwrap();
@@ -1025,8 +1030,9 @@ fn production_pricing_ignores_legacy_reference_switches() {
 #[test]
 fn an_implausible_fit_is_still_priced() {
     let map = synthetic_map(8.0, 3635, 90.0);
-    let mut ez_mods = LazerMods::new();
-    single_mod(&mut ez_mods, GameMod::EasyMania(Default::default()));
+    let mut ez_mods_inner = LazerMods::new();
+    single_mod(&mut ez_mods_inner, GameMod::EasyMania(Default::default()));
+    let ez_mods = GameMods::from(ez_mods_inner);
     let attrs = calculate(&map, &ez_mods, 1.5, Some(true), None).unwrap();
 
     let state = SunnyScoreState {
@@ -1357,6 +1363,7 @@ fn load_real_scores() -> Vec<LoadedScore> {
             single_mod(&mut mods, GameMod::EasyMania(Default::default()));
         }
         let clock_rate = if row.mods.contains("DT") { 1.5 } else { 1.0 };
+        let mods = GameMods::from(mods);
 
         let Some(attrs) = calculate(&map, &mods, clock_rate, Some(true), None) else {
             continue;
@@ -1956,6 +1963,7 @@ fn real_score_report() {
             single_mod(&mut mods, GameMod::EasyMania(Default::default()));
         }
         let clock_rate = if has_dt { 1.5 } else { 1.0 };
+        let mods = GameMods::from(mods);
 
         let Some(attrs) = calculate(&map, &mods, clock_rate, Some(true), None) else {
             println!("{:>9} no difficulty attributes", row.map);
@@ -2317,14 +2325,16 @@ fn fixture_stars() {
             eprintln!("skip {map_id}: cannot parse {}", path.display());
             continue;
         };
-        let mods =
+        let mods_inner =
             rosu_mods::GameModsIntermode::from_bits(mods).with_mode(rosu_mods::GameMode::Mania);
+        let mods_bits = mods_inner.bits();
+        let mods = GameMods::from(mods_inner);
         let Some(attrs) = calculate(&map, &mods, 1.0, Some(false), None) else {
             eprintln!("skip {map_id}: not a mania map");
             continue;
         };
 
-        println!("{map_id}\t{}\t{}", mods.bits(), attrs.stars);
+        println!("{map_id}\t{}\t{}", mods_bits, attrs.stars);
     }
 }
 
@@ -2810,10 +2820,12 @@ fn surface_dump() {
     // The same slice under different windows. Named by GREAT window since that is
     // the single parameter the rest are derived from.
     let window_sets = if let Some((_, map, attrs)) = &map_slice {
-        let mut hr = GameMods::default();
-        single_mod(&mut hr, GameMod::HardRockMania(Default::default()));
-        let mut ez = GameMods::default();
-        single_mod(&mut ez, GameMod::EasyMania(Default::default()));
+        let mut hr_inner = LazerMods::new();
+        single_mod(&mut hr_inner, GameMod::HardRockMania(Default::default()));
+        let hr = GameMods::from(hr_inner);
+        let mut ez_inner = LazerMods::new();
+        single_mod(&mut ez_inner, GameMod::EasyMania(Default::default()));
+        let ez = GameMods::from(ez_inner);
         let hr_attrs = calculate(map, &hr, clock_rate, Some(true), None).unwrap();
         let ez_attrs = calculate(map, &ez, clock_rate, Some(true), None).unwrap();
 
@@ -2938,7 +2950,10 @@ fn od_surface_dump() {
     );
 
     for (scheme, classic) in [("classic", true), ("lazer", false)] {
-        for (mod_label, mods) in [("NM", GameMods::default()), ("EZ", with_ez.clone())] {
+        for (mod_label, mods) in [
+            ("NM", GameMods::default()),
+            ("EZ", GameMods::from(with_ez.clone())),
+        ] {
             for &od in &ods {
                 // A bare non-convert map at this OD; only `od`/`is_convert` reach
                 // the window construction. Converts are deliberately not swept:
@@ -3029,7 +3044,10 @@ fn decoy_ez_comparison() {
 
     let mut rows = Vec::new();
 
-    for (label, mods) in [("DT", GameMods::default()), ("DT+EZ", with_ez)] {
+    for (label, mods) in [
+        ("DT", GameMods::default()),
+        ("DT+EZ", GameMods::from(with_ez)),
+    ] {
         // Classic (stable) scoring, DT 1.5x, as played.
         let attrs = calculate(&map, &mods, 1.5, Some(false), None).unwrap();
         let fit = fit_with_quality(&counts, &units_for(attrs.stars), &attrs.hit_windows, &model);
@@ -3133,6 +3151,7 @@ fn residual_shape_report() {
             single_mod(&mut mods, GameMod::EasyMania(Default::default()));
         }
         let clock_rate = if row.mods.contains("DT") { 1.5 } else { 1.0 };
+        let mods = GameMods::from(mods);
 
         let Some(attrs) = calculate(&map, &mods, clock_rate, Some(true), None) else {
             continue;
@@ -3402,12 +3421,12 @@ struct MultiPriced {
     /// counts, not that the player misplayed.
     reference_g_timing: f64,
 
-    // Full debugging context - only available in test builds, not production
-    #[cfg(test)]
+    // Full debugging context - only available in test builds and report binaries
+    #[cfg(any(test, feature = "reports"))]
     map: Arc<Beatmap>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "reports"))]
     attrs: Arc<SunnyManiaDifficultyAttributes>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "reports"))]
     perf: SunnyManiaPerformanceAttributes,
 }
 
@@ -3424,7 +3443,7 @@ struct MultiPriced {
 /// `notes + LN` while 97 of 98 non-V2 rows total `notes`. So V2 splits an LN into
 /// two judgements and V1 combines them, which changes both the count and the
 /// spread — see [`crate::mania::sunny_accuracy::LN_SIGMA_SCALE`].
-fn mods_for(names: &str) -> (LazerMods, f64) {
+fn mods_for(names: &str) -> (GameMods, f64) {
     let mut mods = LazerMods::new();
     if names.contains("V2") {
         single_mod(&mut mods, GameMod::ScoreV2Mania(Default::default()));
@@ -3447,7 +3466,7 @@ fn mods_for(names: &str) -> (LazerMods, f64) {
         1.0
     };
 
-    (mods, clock_rate)
+    (GameMods::from(mods), clock_rate)
 }
 
 /// One score priced under two [`ErrorModel`]s, for before/after comparison of an
@@ -3487,7 +3506,7 @@ fn report_error_model() -> ErrorModel {
 
 fn composition_from_units(
     attrs: &SunnyManiaDifficultyAttributes,
-    mods: &LazerMods,
+    mods: &GameMods,
     state: SunnyScoreState,
     model: &ErrorModel,
     units: &[crate::mania::sunny_accuracy::JudgementUnit],
@@ -3519,7 +3538,7 @@ fn composition_from_units(
     } else {
         1.0
     };
-    let multiplier = if has_mod(mods, "NF") { 0.75 } else { 1.0 };
+    let multiplier = if mods.nf() { 0.75 } else { 1.0 };
     let difficulty_value =
         compute_difficulty_value(attrs.stars, xxy_custom_accuracy(state), scalar);
     let acc = xxy_acc_multiplier(xxy_custom_accuracy(state), attrs.acc_scalar);
@@ -4065,11 +4084,11 @@ fn load_multiuser() -> Vec<MultiPriced> {
                 reference_skill: reference_fit.skill,
                 reference_g_timing: reference_fit.g_timing,
                 row,
-                #[cfg(test)]
+                #[cfg(any(test, feature = "reports"))]
                 map: Arc::new(map.clone()),
-                #[cfg(test)]
+                #[cfg(any(test, feature = "reports"))]
                 attrs: Arc::new(*attrs),
-                #[cfg(test)]
+                #[cfg(any(test, feature = "reports"))]
                 perf,
             })
         })

@@ -34,7 +34,9 @@
 // here for the accuracy model and its tests.
 
 use crate::model::beatmap::Beatmap;
-use rosu_mods::{Acronym, GameMods};
+use crate::model::mods::GameMods;
+#[cfg(test)]
+use rosu_mods::GameMod;
 
 /// A judgement in osu!mania, ordered from most to least precise.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -233,22 +235,8 @@ pub fn effective_windows(
     clock_rate: f64,
     classic: bool,
 ) -> ManiaHitWindows {
-    let multiplier = difficulty_multiplier_wrapped(mods);
+    let multiplier = difficulty_multiplier(mods);
     effective_windows_with_multiplier(od, is_convert, multiplier, clock_rate, classic)
-}
-
-fn difficulty_multiplier_wrapped(mods: &crate::GameMods) -> f64 {
-    match mods {
-        crate::GameMods::Lazer(mods) => difficulty_multiplier(&mods.clone().into()),
-        crate::GameMods::Intermode(mods) => difficulty_multiplier(
-            &rosu_mods::GameMods::from_intermode(mods, rosu_mods::GameMode::Mania),
-        ),
-        crate::GameMods::Legacy(mods) => difficulty_multiplier(
-            &rosu_mods::GameModsIntermode::from(mods.clone())
-                .with_mode(rosu_mods::GameMode::Mania)
-                .into(),
-        ),
-    }
 }
 
 fn effective_windows_with_multiplier(
@@ -326,9 +314,9 @@ fn classic_windows(od: f64, is_convert: bool) -> ManiaHitWindows {
 /// `DifficultyMultiplier = 1.4` and `EZ` sets `1 / 1.4`, applied to every
 /// window. Since lazer divides by this multiplier, `HR` narrows and `EZ` widens.
 pub(crate) fn difficulty_multiplier(mods: &GameMods) -> f64 {
-    if has_mod(mods, "HR") {
+    if mods.hr() {
         1.4
-    } else if has_mod(mods, "EZ") {
+    } else if mods.ez() {
         1.0 / 1.4
     } else {
         1.0
@@ -358,17 +346,10 @@ fn finalize(raw: ManiaHitWindows, multiplier: f64, clock_rate: f64) -> ManiaHitW
     }
 }
 
-/// Whether the mods contain the mod with the given acronym.
-fn has_mod(mods: &GameMods, acronym: &str) -> bool {
-    acronym
-        .parse::<Acronym>()
-        .is_ok_and(|acronym| mods.contains_acronym(acronym))
-}
-
 #[cfg(test)]
 mod tests {
     use crate::model::mode::GameMode;
-    use rosu_mods::{GameMod, GameMods as LazerMods};
+    use crate::model::mods::GameMods;
 
     use super::*;
 
@@ -381,14 +362,14 @@ mod tests {
         map
     }
 
-    fn mods(list: &[GameMod]) -> LazerMods {
-        let mut mods = LazerMods::new();
+    fn mods(list: &[GameMod]) -> GameMods {
+        let mut mods = rosu_mods::GameMods::new();
 
         for gamemod in list {
             mods.insert(gamemod.clone());
         }
 
-        mods
+        GameMods::from(mods)
     }
 
     fn assert_close(actual: f64, expected: f64) {
@@ -400,7 +381,7 @@ mod tests {
 
     #[test]
     fn classic_non_convert_od9() {
-        let windows = hit_windows(&map(9.0, false), &mods(&[]), 1.0, true);
+        let windows = hit_windows(&map(9.0, false), &GameMods::default(), 1.0, true);
 
         // anti_od = 1, so great = 37, good = 70, ok = 100, meh = 124, miss = 161.
         assert_close(windows.perfect, 16.5);
@@ -415,7 +396,7 @@ mod tests {
     fn classic_perfect_is_od_independent() {
         // 戌井's observation: stable's PERFECT window is flat regardless of OD.
         for od in [0.0, 4.0, 7.5, 10.0] {
-            let windows = hit_windows(&map(od, false), &mods(&[]), 1.0, true);
+            let windows = hit_windows(&map(od, false), &GameMods::default(), 1.0, true);
             assert_close(windows.perfect, 16.5);
         }
     }
@@ -424,18 +405,18 @@ mod tests {
     fn classic_od_extremes_match_lazer_columns() {
         // At OD 0 and OD 10 the classic non-convert formula should coincide with
         // the lazer table's outer columns for every window except PERFECT.
-        let low = hit_windows(&map(0.0, false), &mods(&[]), 1.0, true);
+        let low = hit_windows(&map(0.0, false), &GameMods::default(), 1.0, true);
         assert_close(low.great, 64.5);
         assert_close(low.miss, 188.5);
 
-        let high = hit_windows(&map(10.0, false), &mods(&[]), 1.0, true);
+        let high = hit_windows(&map(10.0, false), &GameMods::default(), 1.0, true);
         assert_close(high.great, 34.5);
         assert_close(high.miss, 158.5);
     }
 
     #[test]
     fn hr_and_ez_scale_every_window_including_perfect() {
-        let base = hit_windows(&map(9.0, false), &mods(&[]), 1.0, true);
+        let base = hit_windows(&map(9.0, false), &GameMods::default(), 1.0, true);
 
         let hr = hit_windows(
             &map(9.0, false),
@@ -477,7 +458,7 @@ mod tests {
             true,
         );
 
-        let od4 = hit_windows(&map(4.0, false), &mods(&[]), 1.0, true);
+        let od4 = hit_windows(&map(4.0, false), &GameMods::default(), 1.0, true);
 
         // GREAT windows land close together...
         assert!((ez.great - od4.great).abs() < 3.0);
@@ -491,8 +472,8 @@ mod tests {
     fn rate_change_barely_moves_windows() {
         // DT/HT are near no-ops for mania windows once 1ms input granularity is
         // accounted for.
-        let normal = hit_windows(&map(9.0, false), &mods(&[]), 1.0, true);
-        let dt = hit_windows(&map(9.0, false), &mods(&[]), 1.5, true);
+        let normal = hit_windows(&map(9.0, false), &GameMods::default(), 1.0, true);
+        let dt = hit_windows(&map(9.0, false), &GameMods::default(), 1.5, true);
 
         assert_close(normal.great, 37.5);
         assert_close(dt.great, 37.0); // floor(37 * 1.5) + 0.5 = 56.0, / 1.5
@@ -502,13 +483,13 @@ mod tests {
     #[test]
     fn lazer_windows_interpolate() {
         // OD 5 sits exactly on the middle column.
-        let mid = hit_windows(&map(5.0, false), &mods(&[]), 1.0, false);
+        let mid = hit_windows(&map(5.0, false), &GameMods::default(), 1.0, false);
         assert_close(mid.perfect, 19.5); // floor(19.4) + 0.5
         assert_close(mid.great, 49.5);
         assert_close(mid.miss, 173.5);
 
         // Unlike classic, PERFECT now responds to OD.
-        let high = hit_windows(&map(10.0, false), &mods(&[]), 1.0, false);
+        let high = hit_windows(&map(10.0, false), &GameMods::default(), 1.0, false);
         assert_close(high.perfect, 13.5);
         assert!(high.perfect < mid.perfect);
     }
@@ -516,11 +497,11 @@ mod tests {
     #[test]
     fn classic_convert_threshold() {
         // round(od) > 4 picks the tighter set.
-        let tight = hit_windows(&map(5.0, true), &mods(&[]), 1.0, true);
+        let tight = hit_windows(&map(5.0, true), &GameMods::default(), 1.0, true);
         assert_close(tight.great, 34.5);
         assert_close(tight.good, 67.5);
 
-        let loose = hit_windows(&map(4.0, true), &mods(&[]), 1.0, true);
+        let loose = hit_windows(&map(4.0, true), &GameMods::default(), 1.0, true);
         assert_close(loose.great, 47.5);
         assert_close(loose.good, 77.5);
 
@@ -541,7 +522,7 @@ mod tests {
     #[test]
     fn stripping_the_mod_multiplier_recovers_the_maps_own_window() {
         for od in [4.0, 8.0, 9.0] {
-            let unmodded = hit_windows(&map(od, false), &mods(&[]), 1.0, true);
+            let unmodded = hit_windows(&map(od, false), &GameMods::default(), 1.0, true);
 
             for mod_list in [
                 vec![GameMod::EasyMania(Default::default())],
@@ -591,7 +572,7 @@ mod tests {
 
     #[test]
     fn judge_maps_errors_to_judgements() {
-        let w = hit_windows(&map(9.0, false), &mods(&[]), 1.0, true);
+        let w = hit_windows(&map(9.0, false), &GameMods::default(), 1.0, true);
 
         assert_eq!(w.judge(0.0), ManiaJudgement::Perfect);
         assert_eq!(w.judge(16.5), ManiaJudgement::Perfect);
@@ -609,7 +590,7 @@ mod tests {
 
     #[test]
     fn bands_are_contiguous() {
-        let w = hit_windows(&map(9.0, false), &mods(&[]), 1.0, true);
+        let w = hit_windows(&map(9.0, false), &GameMods::default(), 1.0, true);
 
         let mut prev_upper = 0.0;
 

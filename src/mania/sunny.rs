@@ -14,12 +14,12 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
+use crate::GameMods;
 use crate::model::{
     beatmap::Beatmap,
     hit_object::{HitObject, HitObjectKind},
     mode::GameMode,
 };
-use rosu_mods::{Acronym, GameMods};
 
 use crate::mania::sunny_accuracy::{
     ErrorModel, JudgementUnit, LN_DURATION_BUCKETS, TIMING_BASELINE_SIGMA,
@@ -1121,7 +1121,7 @@ pub(crate) fn normalize_for_human_reference(
     let mut multiplier = 1.0;
 
     // TODO: only nerf when failed
-    if has_mod(mods, "NF") {
+    if mods.nf() {
         multiplier *= 0.75;
     }
 
@@ -1303,7 +1303,7 @@ fn per_note_difficulty_disabled() -> bool {
 /// `!per_note_difficulty_disabled()`. It is a parameter rather than an env read inside
 /// because the reporting harnesses price the same score both ways in one process, and
 /// mutating the environment mid-test is unsound.
-fn judgement_units(
+pub fn judgement_units(
     attrs: &SunnyManiaDifficultyAttributes,
     total: f64,
     model: &ErrorModel,
@@ -1685,21 +1685,11 @@ pub(crate) fn get_hit_window_300(
 /// weights use the head-only density.
 pub(crate) fn is_classic(lazer: Option<bool>, mods: &GameMods) -> bool {
     let lazer = lazer.unwrap_or(true);
-    // `SV2`, not `V2`: that is the acronym `rosu_mods::ScoreV2Mania` reports, and the
-    // string is parsed rather than matched, so a wrong one silently never matches. It
-    // did exactly that — every score read as ScoreV1, which mattered as soon as long
-    // notes started being judged differently under the two.
-    let sv2 = has_mod(mods, "SV2");
-    let cl = has_mod(mods, "CL");
+    // Use the wrapper's generated methods instead of contains_acronym
+    let sv2 = mods.sv2();
+    let cl = mods.cl();
 
     (!lazer && !sv2) || cl
-}
-
-/// Whether the mods contain the mod with the given acronym.
-fn has_mod(mods: &GameMods, acronym: &str) -> bool {
-    acronym
-        .parse::<Acronym>()
-        .map_or(false, |acronym| mods.contains_acronym(acronym))
 }
 
 // ---------------------------------------------------------------------------
@@ -2929,16 +2919,20 @@ mod inline_tests {
         let mut map = Beatmap::default();
         map.mode = GameMode::Mania;
         map.od = 8.0;
-        let mods = LazerMods::new();
+        let wrapped_nm = GameMods::default();
 
-        assert!((get_hit_window_300(&map, 1.0, true, &mods) - 40.5).abs() < 1e-9);
         let mut hr = LazerMods::new();
         hr.insert(GameMod::HardRockMania(Default::default()));
-        assert!((get_hit_window_300(&map, 1.0, true, &hr) - 28.5).abs() < 1e-9);
+        let wrapped_hr = GameMods::from(hr);
+
         let mut ez = LazerMods::new();
         ez.insert(GameMod::EasyMania(Default::default()));
-        assert!((get_hit_window_300(&map, 1.0, true, &ez) - 56.5).abs() < 1e-9);
-        assert!((get_hit_window_300(&map, 1.5, true, &mods) - 60.5 / 1.5).abs() < 1e-9);
+        let wrapped_ez = GameMods::from(ez);
+
+        assert!((get_hit_window_300(&map, 1.0, true, &wrapped_nm) - 40.5).abs() < 1e-9);
+        assert!((get_hit_window_300(&map, 1.0, true, &wrapped_hr) - 28.5).abs() < 1e-9);
+        assert!((get_hit_window_300(&map, 1.0, true, &wrapped_ez) - 56.5).abs() < 1e-9);
+        assert!((get_hit_window_300(&map, 1.5, true, &wrapped_nm) - 60.5 / 1.5).abs() < 1e-9);
     }
 
     #[test]
@@ -2951,13 +2945,13 @@ mod inline_tests {
         let mut v2 = LazerMods::new();
         v2.insert(GameMod::ScoreV2Mania(Default::default()));
 
-        assert!(!is_classic(Some(false), &v2));
-        assert!(is_classic(Some(false), &LazerMods::new()));
-        assert!(!is_classic(Some(true), &LazerMods::new()));
+        assert!(!is_classic(Some(false), &GameMods::from(v2)));
+        assert!(is_classic(Some(false), &GameMods::from(LazerMods::new())));
+        assert!(!is_classic(Some(true), &GameMods::from(LazerMods::new())));
 
         let mut classic = LazerMods::new();
         classic.insert(GameMod::ClassicMania(Default::default()));
-        assert!(is_classic(Some(true), &classic));
+        assert!(is_classic(Some(true), &GameMods::from(classic)));
     }
 
     #[test]
@@ -2969,14 +2963,49 @@ mod inline_tests {
 
         // Lazer interpolation gives 52ms at OD4; Classic uses the convert
         // threshold and gives 47ms. Classic must win even with the Lazer switch.
-        let mods = LazerMods::new();
+        let mods = GameMods::from(LazerMods::new());
         assert!((get_hit_window_300(&map, 1.0, false, &mods) - 52.0).abs() < 1e-9);
         assert!((get_hit_window_300(&map, 1.0, true, &mods) - 47.0).abs() < 1e-9);
 
-        let mut mods = LazerMods::new();
-        mods.insert(GameMod::ClassicMania(Default::default()));
+        let mut mods_inner = LazerMods::new();
+        mods_inner.insert(GameMod::ClassicMania(Default::default()));
+        let mods = GameMods::from(mods_inner);
         assert!(is_classic(Some(true), &mods));
     }
+}
+
+// Report helper functions - only available with reports feature or in tests
+#[cfg(any(test, feature = "reports"))]
+pub use crate::mania::difficulty::per_note_difficulty;
+
+#[cfg(any(test, feature = "reports"))]
+pub fn mods_for(names: &str) -> (crate::GameMods, f64) {
+    use rosu_mods::GameMod;
+
+    let mut mods = rosu_mods::GameMods::new();
+    if names.contains("V2") {
+        mods.insert(GameMod::ScoreV2Mania(Default::default()));
+    }
+    if names.contains("EZ") {
+        mods.insert(GameMod::EasyMania(Default::default()));
+    }
+    if names.contains("HR") {
+        mods.insert(GameMod::HardRockMania(Default::default()));
+    }
+    if names.contains("NF") {
+        mods.insert(GameMod::NoFailMania(Default::default()));
+    }
+
+    let clock_rate = if names.contains("DT") || names.contains("NC") {
+        1.5
+    } else if names.contains("HT") {
+        0.75
+    } else {
+        1.0
+    };
+
+    // Return wrapped GameMods
+    (crate::GameMods::from(mods), clock_rate)
 }
 
 #[cfg(test)]
