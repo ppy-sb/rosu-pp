@@ -28,7 +28,7 @@ impl ManiaPerformanceCalculator<'_> {
         }
 
         if self.mods.ez() {
-            multiplier *= 0.90;
+            multiplier *= 0.6;
         }
 
         let score_accuracy = self.calculate_custom_accuracy();
