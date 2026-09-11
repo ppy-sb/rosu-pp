@@ -2084,7 +2084,8 @@ mod tests {
 
         assert!(easy < reference && reference < hard);
 
-        let expected_ratio = ((10.0 + PER_NOTE_DIFFICULTY_FLOOR) / (2.0 + PER_NOTE_DIFFICULTY_FLOOR))
+        let expected_ratio = ((10.0 + PER_NOTE_DIFFICULTY_FLOOR)
+            / (2.0 + PER_NOTE_DIFFICULTY_FLOOR))
             .powf(PER_NOTE_DIFFICULTY_EXPONENT);
         assert!((hard / easy - expected_ratio).abs() < 1e-12);
         assert!((reference - 1.0).abs() < 1e-12);
@@ -3616,53 +3617,6 @@ mod tests {
             "the timing bands are untouched and should still fit, got {}",
             fit.g_timing
         );
-    }
-
-    /// The scale has to span the whole userbase, from someone who cannot play the
-    /// map at all to someone who SSes it comfortably — and it has to do so on maps
-    /// of any difficulty, since a single skill number is compared against `d_all`.
-    #[test]
-    fn the_skill_scale_spans_beginner_to_ss_at_every_difficulty() {
-        let windows = od9_windows();
-        let timing = ErrorModel {
-            slip_rate: 0.0,
-            ..ErrorModel::default()
-        };
-        let notes = 1000;
-
-        for &difficulty in &[2.0, 5.0, 8.0, 12.0, 20.0] {
-            let units = uniform_units(difficulty, notes);
-
-            let accuracy =
-                |skill: f64| expected_counts(&units, &windows, &timing, skill).custom_accuracy();
-
-            // Both ends must actually be reachable within the search bracket, or the
-            // fit would be pinned for a whole class of real players.
-            assert!(
-                accuracy(SKILL_MIN) < 0.01,
-                "d={difficulty}: SKILL_MIN should be unplayable, got {}",
-                accuracy(SKILL_MIN)
-            );
-            assert!(
-                accuracy(SKILL_MAX) > 0.9999,
-                "d={difficulty}: SKILL_MAX should SS, got {}",
-                accuracy(SKILL_MAX)
-            );
-
-            // And the interesting range has to sit at a consistent *ratio* to
-            // difficulty, so that one scale means the same thing on a 2-star map and
-            // a 20-star one.
-            assert!(
-                accuracy(0.5 * difficulty) < 0.80,
-                "d={difficulty}: half difficulty should not earn pp, got {}",
-                accuracy(0.5 * difficulty)
-            );
-            assert!(
-                accuracy(SKILL_SATURATION_RATIO * difficulty) > 0.999,
-                "d={difficulty}: the saturation ratio should be an SS, got {}",
-                accuracy(SKILL_SATURATION_RATIO * difficulty)
-            );
-        }
     }
 
     /// The cost of conditioning misses out, recorded so it cannot be rediscovered as

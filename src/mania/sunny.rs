@@ -2955,6 +2955,49 @@ mod inline_tests {
     }
 
     #[test]
+    fn all_calculators_computes_same_window() {
+        let mut map = Beatmap::default();
+        map.mode = GameMode::Mania;
+        let mods = GameMods::from(LazerMods::new());
+
+        // Collect failure messages instead of panicking immediately
+        let mut failures = Vec::new();
+
+        for is_classic in [false, true] {
+            for is_convert in [false, true] {
+                map.is_convert = is_convert;
+                for clock_rate in [0.5, 1.0, 1.5] {
+                    for od in 0..=100 {
+                        let od = od as f32 / 10.0;
+                        map.od = od;
+                        let new_calculator = hit_windows(&map, &mods, clock_rate, is_classic);
+                        let actual = new_calculator.great;
+                        let expected = get_hit_window_300(&map, clock_rate, is_classic, &mods);
+
+                        // Check condition manually
+                        if actual != expected {
+                            failures.push(format!(
+                                "Failure at is_classic={is_classic}, is_convert={is_convert}, clock_rate={clock_rate}, OD={od}\n\
+                                 Expected: {expected:?}\n\
+                                 Actual:   {actual:?}\n"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Panic with all collected messages if any failures occurred
+        if !failures.is_empty() {
+            panic!(
+                "\n=== {} Assertion(s) Failed ===\n\n{}",
+                failures.len(),
+                failures.join("------------------------------\n")
+            );
+        }
+    }
+
+    #[test]
     fn classic_mod_overrides_lazer_window_scheme() {
         let mut map = Beatmap::default();
         map.mode = GameMode::Mania;
@@ -2963,6 +3006,7 @@ mod inline_tests {
 
         // Lazer interpolation gives 52ms at OD4; Classic uses the convert
         // threshold and gives 47ms. Classic must win even with the Lazer switch.
+
         let mods = GameMods::from(LazerMods::new());
         assert!((get_hit_window_300(&map, 1.0, false, &mods) - 52.0).abs() < 1e-9);
         assert!((get_hit_window_300(&map, 1.0, true, &mods) - 47.0).abs() < 1e-9);

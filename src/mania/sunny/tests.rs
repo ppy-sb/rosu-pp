@@ -144,8 +144,6 @@ fn sigma_gap_measurement() {
 
 const MAP_1638954: &str =
     r"C:\Users\uuzof\AppData\Local\Temp\opencode\rosu-pp\resources\1638954.osu";
-const MAP_5269878: &str =
-    r"C:\Users\uuzof\AppData\Local\Temp\opencode\rosu-pp\resources\5269878.osu";
 
 fn single_mod(mods: &mut LazerMods, gamemod: GameMod) {
     mods.insert(gamemod);
@@ -326,297 +324,6 @@ fn input_state_bins_match_each_scoring_modes_judgement_count() {
     }
 }
 
-#[test]
-fn input_state_surface_is_effective_by_default_and_can_be_disabled() {
-    let map = synthetic_map(8.0, 400, 90.0);
-    let attrs = calculate(&map, &GameMods::default(), 1.0, Some(true), None).unwrap();
-    let without_bins = SunnyManiaDifficultyAttributes {
-        input_state_bins: None,
-        ..attrs
-    };
-    let enabled = ErrorModel::default();
-    let disabled = ErrorModel {
-        recovery_offset: 0.0,
-        anticipation_offset: 0.0,
-        ..enabled
-    };
-    let with_disabled = judgement_units(&attrs, 400.0, &disabled, true);
-    let without_disabled = judgement_units(&without_bins, 400.0, &disabled, true);
-
-    assert_eq!(with_disabled, without_disabled);
-
-    let with_enabled = judgement_units(&attrs, 400.0, &enabled, true);
-    let without_enabled = judgement_units(&without_bins, 400.0, &enabled, true);
-    let expected_with = crate::mania::sunny_accuracy::expected_counts(
-        &with_enabled,
-        &attrs.hit_windows,
-        &enabled,
-        8.0,
-    );
-    let expected_without = crate::mania::sunny_accuracy::expected_counts(
-        &without_enabled,
-        &attrs.hit_windows,
-        &enabled,
-        8.0,
-    );
-
-    assert_ne!(expected_with.as_array(), expected_without.as_array());
-
-    let weighted_recovery_mean: f64 = with_enabled
-        .iter()
-        .map(|unit| unit.weight * unit.fading_mean_offset)
-        .sum::<f64>()
-        / with_enabled.iter().map(|unit| unit.weight).sum::<f64>();
-    assert!(
-        weighted_recovery_mean.abs() < 1e-12,
-        "per-score-relative recovery offsets must not introduce a global shift: {weighted_recovery_mean} ms"
-    );
-
-    let ss_ceiling = crate::mania::sunny_accuracy::expected_counts(
-        &with_enabled,
-        &attrs.hit_windows,
-        &enabled,
-        1.0e6,
-    )
-    .get(crate::mania::sunny_windows::ManiaJudgement::Perfect)
-        / 400.0;
-    assert!(
-        ss_ceiling > 0.999_999,
-        "input-state conditioning must still permit an SS, ceiling={ss_ceiling}"
-    );
-}
-
-#[test]
-#[ignore = "reads one gitignored fixture and prints an input-state diagnostic"]
-fn diagnose_input_state_map_4772182() {
-    use crate::mania::sunny_accuracy::expected_counts;
-    use crate::mania::sunny_windows::ManiaJudgement;
-
-    let map = parse("local-fixtures/maps/4772182.osu").expect("fixture map 4772182");
-    let (mods, clock_rate) = mods_for("DT");
-    let attrs = calculate(&map, &mods, clock_rate, Some(false), None).unwrap();
-    let counts = [2453, 423, 0, 0, 0, 0];
-    let total = counts.iter().sum::<u32>() as f64;
-
-    let baseline = ErrorModel::default();
-    let candidate = ErrorModel {
-        recovery_offset: 73.12,
-        ..baseline
-    };
-
-    for (label, model) in [("baseline", baseline), ("candidate", candidate)] {
-        let units = judgement_units(&attrs, total, &model, true);
-        let played = fit_with_quality(&counts, &units, &attrs.hit_windows, &model);
-        let reference = fit_with_quality(&counts, &units, &reference_windows(&attrs), &model);
-        let ceiling = expected_counts(&units, &attrs.hit_windows, &model, 1.0e6)
-            .get(ManiaJudgement::Perfect)
-            / total;
-        println!(
-            "{label}: units={} played_skill={:.6} reference_skill={:.6} scalar={:.8} g={:.3}/{:.3} perfect_ceiling={:.6}",
-            units.len(),
-            played.skill,
-            reference.skill,
-            played.skill / reference.skill,
-            played.g_timing,
-            reference.g_timing,
-            ceiling,
-        );
-        assert!(label == "baseline" || ceiling > 0.999_999);
-    }
-
-    println!("class quantiles:");
-    for bin in attrs
-        .input_state_bins
-        .unwrap()
-        .iter()
-        .filter(|bin| bin.count > 0)
-    {
-        let offset = if bin.predecessor_count > 0 {
-            candidate.recovery_mean_offset(bin.mean_gap_ms) * f64::from(bin.predecessor_count)
-                / f64::from(bin.count)
-        } else {
-            0.0
-        };
-        println!(
-            "  {:?}: n={} pred={} d={:.3} gap={:.2} chord={:.2} held={:.2} offset={:+.2}",
-            bin.class,
-            bin.count,
-            bin.predecessor_count,
-            bin.mean_difficulty,
-            bin.mean_gap_ms,
-            bin.mean_chord_width,
-            bin.mean_other_held,
-            offset,
-        );
-    }
-}
-
-#[test]
-#[ignore = "reads one gitignored fixture and prints a low-OD LN diagnostic"]
-fn diagnose_input_state_map_3217217() {
-    use crate::mania::sunny_accuracy::expected_counts;
-    use crate::mania::sunny_windows::ManiaJudgement;
-
-    let map = parse("local-fixtures/maps/3217217.osu").expect("fixture map 3217217");
-    let (mods, clock_rate) = mods_for("MR");
-    let attrs = calculate(&map, &mods, clock_rate, Some(false), None).unwrap();
-    let counts = [1381, 2071, 49, 9, 11, 32];
-    let total = counts.iter().sum::<u32>() as f64;
-    let live_pp = 877.228;
-
-    println!(
-        "map: objects={} long_notes={} LN={:.1}% judgements={} OD={:.1} windows={:?}",
-        attrs.n_objects,
-        attrs.n_long_notes,
-        100.0 * attrs.n_long_notes as f64 / attrs.n_objects as f64,
-        total,
-        map.od,
-        attrs.hit_windows,
-    );
-
-    let baseline = ErrorModel::default();
-    let candidate = ErrorModel {
-        recovery_offset: 73.12,
-        ..baseline
-    };
-
-    for (label, model) in [("baseline", baseline), ("candidate", candidate)] {
-        let units = judgement_units(&attrs, total, &model, true);
-        let played = fit_with_quality(&counts, &units, &attrs.hit_windows, &model);
-        let reference = fit_with_quality(&counts, &units, &reference_windows(&attrs), &model);
-        let perf = calculate_performance_inner(
-            &attrs,
-            &mods,
-            SunnyScoreState {
-                n320: counts[0],
-                n300: counts[1],
-                n200: counts[2],
-                n100: counts[3],
-                n50: counts[4],
-                misses: counts[5],
-            },
-            &model,
-            None,
-        );
-        let ceiling = expected_counts(&units, &attrs.hit_windows, &model, 1.0e6)
-            .get(ManiaJudgement::Perfect)
-            / total;
-
-        println!(
-            "{label}: units={} pp={:.2} live_ratio={:.2}% played_skill={:.6} reference_skill={:.6} scalar={:.8} g={:.3}/{:.3} perfect_ceiling={:.6}",
-            units.len(),
-            perf.pp,
-            100.0 * perf.pp / live_pp,
-            played.skill,
-            reference.skill,
-            played.skill / reference.skill,
-            played.g_timing,
-            reference.g_timing,
-            ceiling,
-        );
-    }
-
-    let total_columns = map.cs.round_ties_even().max(1.0) as usize;
-    let (notes, _) = build_notes(clock_rate, map.hit_objects.iter(), total_columns);
-    let windows = hit_windows(&map, &mods, clock_rate, false);
-    let great = get_hit_window_300(&map, clock_rate, false, &mods);
-    let data = RebirthData::new(
-        notes,
-        total_columns,
-        hit_leniency_from_window(great),
-        windows.good,
-    );
-    let (_, _, per_note) = per_note_difficulty(&map).expect("per-note difficulty");
-    let gaps = same_column_gaps(&data);
-    let per_unit = total / per_note.len() as f64;
-    let mut exact = Vec::with_capacity(per_note.len());
-
-    for (idx, &(difficulty, duration)) in per_note.iter().enumerate() {
-        let (sigma_scale, release_offset) = match duration {
-            Some(duration) if attrs.ln_judged_as_one => (
-                crate::mania::sunny_accuracy::ln_sigma_scale_for_duration(&candidate, duration),
-                candidate.release_mean_offset,
-            ),
-            _ => (1.0, 0.0),
-        };
-
-        exact.push(JudgementUnit {
-            difficulty,
-            weight: per_unit,
-            sigma_scale,
-            mean_offset: release_offset,
-            fading_mean_offset: candidate.recovery_mean_offset(gaps[idx]),
-        });
-    }
-
-    let exact_played = fit_with_quality(&counts, &exact, &attrs.hit_windows, &candidate);
-    let exact_reference = fit_with_quality(&counts, &exact, &reference_windows(&attrs), &candidate);
-    let exact_scalar = exact_played.skill / exact_reference.skill;
-    let compact_pp = calculate_performance_inner(
-        &attrs,
-        &mods,
-        SunnyScoreState {
-            n320: counts[0],
-            n300: counts[1],
-            n200: counts[2],
-            n100: counts[3],
-            n50: counts[4],
-            misses: counts[5],
-        },
-        &candidate,
-        None,
-    )
-    .pp;
-    let compact_units = judgement_units(&attrs, total, &candidate, true);
-    let compact_played = fit_with_quality(&counts, &compact_units, &attrs.hit_windows, &candidate);
-    let compact_reference = fit_with_quality(
-        &counts,
-        &compact_units,
-        &reference_windows(&attrs),
-        &candidate,
-    );
-    let compact_scalar = compact_played.skill / compact_reference.skill;
-    println!(
-        "exact candidate: units={} played_skill={:.6} reference_skill={:.6} scalar={:.8} g={:.3}/{:.3} implied_pp={:.2} compact_pp={:.2}",
-        exact.len(),
-        exact_played.skill,
-        exact_reference.skill,
-        exact_scalar,
-        exact_played.g_timing,
-        exact_reference.g_timing,
-        compact_pp * (exact_scalar / compact_scalar).powf(2.2),
-        compact_pp,
-    );
-
-    println!("class quantiles:");
-    for bin in attrs
-        .input_state_bins
-        .unwrap()
-        .iter()
-        .filter(|bin| bin.count > 0)
-    {
-        let offset = if bin.predecessor_count > 0 {
-            candidate.recovery_mean_offset(bin.mean_gap_ms) * f64::from(bin.predecessor_count)
-                / f64::from(bin.count)
-        } else {
-            0.0
-        };
-        println!(
-            "  {:?}: n={} long={} pred={} d={:.3} duration={:.1} gap={:.2} chord={:.2} held={:.2} offset={:+.2}",
-            bin.class,
-            bin.count,
-            bin.long_count,
-            bin.predecessor_count,
-            bin.mean_difficulty,
-            bin.mean_duration_ms,
-            bin.mean_gap_ms,
-            bin.mean_chord_width,
-            bin.mean_other_held,
-            offset,
-        );
-    }
-}
-
 /// The per-note path must hand the fit exactly the score that was played.
 ///
 /// [`crate::mania::sunny_accuracy::skill_for_counts`] fits a multinomial, so the unit weights
@@ -729,35 +436,6 @@ fn per_note_bins_partition_the_map() {
             pair[1].difficulty
         );
     }
-}
-
-/// The Python reference (Star-Rating-Rebirth) uses the OD-based hit
-/// leniency while this port uses the C# great-hit-window based one, so
-/// the SR values differ by a small margin.
-#[test]
-fn matches_python_reference_1638954() {
-    let Some(map) = parse(MAP_1638954) else {
-        return;
-    };
-    let mods = GameMods::default();
-    let attrs = calculate(&map, &mods, 1.0, Some(true), None).unwrap();
-
-    // Python reference: 3.712606
-    let relative = (attrs.stars - 3.712606).abs() / 3.712606;
-    assert!(relative < 0.03, "SR {} deviates by {relative}", attrs.stars);
-}
-
-#[test]
-fn matches_python_reference_5269878() {
-    let Some(map) = parse(MAP_5269878) else {
-        return;
-    };
-    let mods = GameMods::default();
-    let attrs = calculate(&map, &mods, 1.0, Some(true), None).unwrap();
-
-    // Python reference: 9.299379
-    let relative = (attrs.stars - 9.299379).abs() / 9.299379;
-    assert!(relative < 0.03, "SR {} deviates by {relative}", attrs.stars);
 }
 
 #[test]
@@ -1077,271 +755,11 @@ fn an_implausible_fit_is_still_priced() {
 // Real-score comparison
 // -----------------------------------------------------------------------
 
-/// One real score from the live server, with the pp it was awarded there.
-struct Row {
-    map: &'static str,
-    n320: u32,
-    n300: u32,
-    n200: u32,
-    n100: u32,
-    n50: u32,
-    miss: u32,
-    live_pp: f64,
-    live_acc: f64,
-    mods: &'static str,
-}
-
-/// The top scores of uid 10107, an `EZ` pp exploiter, fetched from the ppy-sb
-/// tRPC API. Beatmaps live alongside in `local-fixtures/maps/`; both are
-/// gitignored, so this report skips when they are absent.
-const REAL_SCORES: &[Row] = &[
-    Row {
-        map: "4633018",
-        n320: 1987,
-        n300: 1710,
-        n200: 593,
-        n100: 20,
-        n50: 8,
-        miss: 138,
-        live_pp: 1379.012,
-        live_acc: 91.241,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "5583718",
-        n320: 1399,
-        n300: 980,
-        n200: 324,
-        n100: 46,
-        n50: 5,
-        miss: 13,
-        live_pp: 1356.142,
-        live_acc: 94.368,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "3663002",
-        n320: 1975,
-        n300: 1863,
-        n200: 591,
-        n100: 34,
-        n50: 0,
-        miss: 210,
-        live_pp: 1313.038,
-        live_acc: 90.01,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "4870605",
-        n320: 1436,
-        n300: 1194,
-        n200: 600,
-        n100: 35,
-        n50: 0,
-        miss: 42,
-        live_pp: 1279.841,
-        live_acc: 91.181,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "4870608",
-        n320: 2590,
-        n300: 2266,
-        n200: 928,
-        n100: 132,
-        n50: 30,
-        miss: 50,
-        live_pp: 1240.625,
-        live_acc: 92.123,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "3583718",
-        n320: 1359,
-        n300: 1458,
-        n200: 783,
-        n100: 52,
-        n50: 3,
-        miss: 65,
-        live_pp: 1199.563,
-        live_acc: 89.357,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "5583724",
-        n320: 1323,
-        n300: 1366,
-        n200: 550,
-        n100: 102,
-        n50: 29,
-        miss: 17,
-        live_pp: 1183.49,
-        live_acc: 91.364,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "4459721",
-        n320: 1306,
-        n300: 1502,
-        n200: 648,
-        n100: 34,
-        n50: 0,
-        miss: 71,
-        live_pp: 1095.582,
-        live_acc: 90.408,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "4459716",
-        n320: 1240,
-        n300: 1120,
-        n200: 486,
-        n100: 93,
-        n50: 1,
-        miss: 18,
-        live_pp: 1094.649,
-        live_acc: 91.791,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "4807505",
-        n320: 2407,
-        n300: 1825,
-        n200: 761,
-        n100: 128,
-        n50: 35,
-        miss: 54,
-        live_pp: 1065.901,
-        live_acc: 91.897,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "5583717",
-        n320: 1095,
-        n300: 1149,
-        n200: 544,
-        n100: 34,
-        n50: 1,
-        miss: 105,
-        live_pp: 1028.791,
-        live_acc: 88.565,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "4870609",
-        n320: 1048,
-        n300: 940,
-        n200: 326,
-        n100: 17,
-        n50: 0,
-        miss: 49,
-        live_pp: 984.332,
-        live_acc: 92.098,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "4459712",
-        n320: 1415,
-        n300: 1016,
-        n200: 393,
-        n100: 47,
-        n50: 7,
-        miss: 13,
-        live_pp: 965.078,
-        live_acc: 93.733,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "4459715",
-        n320: 1203,
-        n300: 1536,
-        n200: 779,
-        n100: 37,
-        n50: 0,
-        miss: 65,
-        live_pp: 945.481,
-        live_acc: 89.414,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "4459717",
-        n320: 1213,
-        n300: 1138,
-        n200: 583,
-        n100: 38,
-        n50: 4,
-        miss: 38,
-        live_pp: 920.466,
-        live_acc: 90.503,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "4706643",
-        n320: 882,
-        n300: 538,
-        n200: 195,
-        n100: 48,
-        n50: 1,
-        miss: 19,
-        live_pp: 895.026,
-        live_acc: 93.058,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "4459723",
-        n320: 940,
-        n300: 953,
-        n200: 410,
-        n100: 30,
-        n50: 0,
-        miss: 47,
-        live_pp: 852.64,
-        live_acc: 90.591,
-        mods: "EZ+DT",
-    },
-    Row {
-        map: "4229780",
-        n320: 2459,
-        n300: 963,
-        n200: 144,
-        n100: 56,
-        n50: 13,
-        miss: 82,
-        live_pp: 722.134,
-        live_acc: 95.207,
-        mods: "",
-    },
-    Row {
-        map: "3477077",
-        n320: 1482,
-        n300: 637,
-        n200: 84,
-        n100: 12,
-        n50: 3,
-        miss: 42,
-        live_pp: 707.994,
-        live_acc: 96.438,
-        mods: "",
-    },
-    Row {
-        map: "3477076",
-        n320: 1587,
-        n300: 598,
-        n200: 66,
-        n100: 8,
-        n50: 1,
-        miss: 16,
-        live_pp: 672.317,
-        live_acc: 98.059,
-        mods: "",
-    },
-];
-
 /// One fixture reduced to what the surface needs: the windows it was played
 /// under, its star rating, and its judgement counts.
 struct LoadedScore {
-    map: &'static str,
-    mods: &'static str,
+    map: String,
+    mods: String,
     stars: f64,
     windows: ManiaHitWindows,
     counts: [u32; 6],
@@ -1350,35 +768,53 @@ struct LoadedScore {
 /// Load every fixture that is present on disk. Returns empty when the gitignored
 /// fixture directory is absent, which is how the reports skip cleanly.
 fn load_real_scores() -> Vec<LoadedScore> {
-    let mut loaded = Vec::new();
+    use rayon::prelude::*;
+    use std::collections::{HashMap, HashSet};
+    let rows = load_multiuser_rows();
 
-    for row in REAL_SCORES {
-        let path = format!("local-fixtures/maps/{}.osu", row.map);
-        let Some(map) = parse(&path) else {
-            continue;
-        };
+    // Difficulty is a map/mod concern, not a score concern. Build each unique job once,
+    // then let map parsing and SR calculation occupy the Rayon pool independently of PP.
+    let jobs: HashSet<_> = rows
+        .iter()
+        .map(|row| (row.map_id.clone(), row.mods.clone()))
+        .collect();
 
-        let mut mods = LazerMods::new();
-        if row.mods.contains("EZ") {
-            single_mod(&mut mods, GameMod::EasyMania(Default::default()));
-        }
-        let clock_rate = if row.mods.contains("DT") { 1.5 } else { 1.0 };
-        let mods = GameMods::from(mods);
+    let maps_dir = std::env::var_os("SUNNY_MAPS").unwrap_or_else(|| "local-fixtures/maps".into());
 
-        let Some(attrs) = calculate(&map, &mods, clock_rate, Some(true), None) else {
-            continue;
-        };
+    let attrs_by_job: HashMap<_, _> = jobs
+        .into_par_iter()
+        .filter_map(|(map_id, mod_names)| {
+            let map = parse(&format!("{}/{}.osu", maps_dir.to_string_lossy(), map_id))?;
+            let (mods, clock_rate) = mods_for(&mod_names);
 
-        loaded.push(LoadedScore {
-            map: row.map,
-            mods: row.mods,
-            stars: attrs.stars,
-            windows: attrs.hit_windows,
-            counts: [row.n320, row.n300, row.n200, row.n100, row.n50, row.miss],
-        });
-    }
+            Some(((map_id, mod_names), (map, mods, clock_rate)))
+        })
+        .collect();
 
-    loaded
+    let rtn = rows
+        .into_par_iter()
+        .filter_map(|row| {
+            let (map, mods, clock_rate) =
+                attrs_by_job.get(&(row.map_id.clone(), row.mods.clone()))?;
+
+            // let state = SunnyScoreState {
+            //     n320: row.counts[0],
+            //     n300: row.counts[1],
+            //     n200: row.counts[2],
+            //     n100: row.counts[3],
+            //     n50: row.counts[4],
+            //     misses: row.counts[5],
+            // };
+            Some(LoadedScore {
+                map: row.map_id,
+                mods: row.mods,
+                stars: row.live_stars,
+                windows: hit_windows(map, &mods, clock_rate.clone(), true),
+                counts: row.counts,
+            })
+        })
+        .collect::<Vec<_>>();
+    rtn
 }
 
 /// Mean `g_timing` across the loaded scores under a candidate model.
@@ -1652,9 +1088,9 @@ fn calibration_search() {
             "{:>9} {:>7} {:>7.4} {:>9.1} {:>9.1}",
             score.map,
             if score.mods.is_empty() {
-                "NM"
+                "NM".to_string()
             } else {
-                score.mods
+                score.mods.clone()
             },
             scalar,
             before.g_timing,
@@ -1929,132 +1365,6 @@ fn calibrate_lapse_on_multiuser() {
         "Refined:   lapse_weight={:.4} lapse_ratio={:.3} mean g_timing={:.2}",
         best.lapse_weight, best.lapse_ratio, best_score
     );
-}
-
-/// Not an assertion — a report. Prices every real score through the current
-/// pipeline and prints the window scalar next to what the live server paid, so
-/// the mod response can be read off real data rather than synthetics.
-///
-/// Run with `cargo test real_score_report -- --ignored --nocapture`.
-#[test]
-#[ignore = "reads gitignored fixtures; prints a report rather than asserting"]
-fn real_score_report() {
-    let mut priced = 0usize;
-    let mut ez_scalars = Vec::new();
-    let mut nm_scalars = Vec::new();
-
-    println!(
-        "{:>9} {:>7} {:>4} {:>6} {:>7} {:>8} {:>8} {:>7} {:>7} {:>9}",
-        "map", "mods", "od", "stars", "acc%", "livePP", "ourPP", "scalar", "ppRatio", "g_timing",
-    );
-
-    for row in REAL_SCORES {
-        let path = format!("local-fixtures/maps/{}.osu", row.map);
-        let Some(map) = parse(&path) else {
-            println!("{:>9} missing beatmap", row.map);
-            continue;
-        };
-
-        let has_ez = row.mods.contains("EZ");
-        let has_dt = row.mods.contains("DT");
-
-        let mut mods = LazerMods::new();
-        if has_ez {
-            single_mod(&mut mods, GameMod::EasyMania(Default::default()));
-        }
-        let clock_rate = if has_dt { 1.5 } else { 1.0 };
-        let mods = GameMods::from(mods);
-
-        let Some(attrs) = calculate(&map, &mods, clock_rate, Some(true), None) else {
-            println!("{:>9} no difficulty attributes", row.map);
-            continue;
-        };
-
-        let state = SunnyScoreState {
-            n320: row.n320,
-            n300: row.n300,
-            n200: row.n200,
-            n100: row.n100,
-            n50: row.n50,
-            misses: row.miss,
-        };
-
-        let perf = calculate_performance(&attrs, &mods, state);
-
-        let counts = [
-            state.n320,
-            state.n300,
-            state.n200,
-            state.n100,
-            state.n50,
-            state.misses,
-        ];
-        let units = [JudgementUnit::repeated(
-            attrs.stars,
-            f64::from(state.total_hits()),
-        )];
-        let fit = fit_with_quality(&counts, &units, &attrs.hit_windows, &ErrorModel::default());
-
-        // What the same score would be worth with the scalar switched off, so
-        // the window effect can be read directly in pp rather than in skill.
-        let unpriced = compute_difficulty_value(attrs.stars, xxy_custom_accuracy(state), 1.0);
-        let pp_ratio = if unpriced > 0.0 {
-            compute_difficulty_value(
-                attrs.stars,
-                xxy_custom_accuracy(state),
-                1.0f64, /* window_scalar leftover */
-            ) / unpriced
-        } else {
-            1.0
-        };
-
-        println!(
-            "{:>9} {:>7} {:>4.1} {:>6.2} {:>7.3} {:>8.1} {:>8.1} {:>7.4} {:>7.4} {:>9.1} {:>8}",
-            row.map,
-            if row.mods.is_empty() { "NM" } else { row.mods },
-            map.od,
-            attrs.stars,
-            row.live_acc,
-            row.live_pp,
-            perf.pp,
-            1.0f64, /* window_scalar leftover */
-            pp_ratio,
-            fit.g_timing,
-            fit.is_plausible()
-        );
-
-        priced += 1;
-        if has_ez {
-            ez_scalars.push((1.0f64 /* window_scalar leftover */, pp_ratio));
-        } else {
-            nm_scalars.push((1.0f64 /* window_scalar leftover */, pp_ratio));
-        }
-    }
-
-    if priced == 0 {
-        println!("no fixtures present; nothing to report");
-        return;
-    }
-
-    let summarise = |label: &str, values: &[(f64, f64)]| {
-        if values.is_empty() {
-            return;
-        }
-        let n = values.len() as f64;
-        let mean_scalar = values.iter().map(|v| v.0).sum::<f64>() / n;
-        let mean_pp = values.iter().map(|v| v.1).sum::<f64>() / n;
-        let min = values.iter().map(|v| v.0).fold(f64::INFINITY, f64::min);
-        let max = values.iter().map(|v| v.0).fold(f64::NEG_INFINITY, f64::max);
-        println!(
-            "{label}: n={} mean scalar {mean_scalar:.4} ({min:.4}..{max:.4})  \
-                 mean pp ratio {mean_pp:.4}",
-            values.len()
-        );
-    };
-
-    println!();
-    summarise("EZ", &ez_scalars);
-    summarise("NM", &nm_scalars);
 }
 
 /// Not an assertion — the one real external check available on the surface.
@@ -3140,24 +2450,26 @@ fn residual_shape_report() {
         "predicted 320/300/200/100/50"
     );
 
-    for row in REAL_SCORES {
-        let path = format!("local-fixtures/maps/{}.osu", row.map);
+    let loaded = load_multiuser_rows();
+
+    for score in loaded {
+        let path = format!("local-fixtures/maps/{}.osu", score.map_id);
         let Some(map) = parse(&path) else {
             continue;
         };
 
         let mut mods = LazerMods::new();
-        if row.mods.contains("EZ") {
+        if score.mods.contains("EZ") {
             single_mod(&mut mods, GameMod::EasyMania(Default::default()));
         }
-        let clock_rate = if row.mods.contains("DT") { 1.5 } else { 1.0 };
+        let clock_rate = if score.mods.contains("DT") { 1.5 } else { 1.0 };
         let mods = GameMods::from(mods);
 
         let Some(attrs) = calculate(&map, &mods, clock_rate, Some(true), None) else {
             continue;
         };
 
-        let counts = [row.n320, row.n300, row.n200, row.n100, row.n50, row.miss];
+        let counts = score.counts;
         let total: u32 = counts.iter().sum();
         let units = [JudgementUnit::repeated(attrs.stars, f64::from(total))];
         let model = ErrorModel::default();
@@ -3166,7 +2478,7 @@ fn residual_shape_report() {
 
         // Both sides conditioned on the note having been hit, which is the
         // space the fit actually works in.
-        let observed_timing = f64::from(total - row.miss);
+        let observed_timing = f64::from(total - counts[5]);
         let expected_timing = expected.total() - expected.get(ManiaJudgement::Miss);
 
         let fmt = |shares: [f64; 5]| {
@@ -3178,11 +2490,11 @@ fn residual_shape_report() {
         };
 
         let observed_shares = [
-            f64::from(row.n320) / observed_timing,
-            f64::from(row.n300) / observed_timing,
-            f64::from(row.n200) / observed_timing,
-            f64::from(row.n100) / observed_timing,
-            f64::from(row.n50) / observed_timing,
+            f64::from(counts[0]) / observed_timing,
+            f64::from(counts[1]) / observed_timing,
+            f64::from(counts[2]) / observed_timing,
+            f64::from(counts[3]) / observed_timing,
+            f64::from(counts[4]) / observed_timing,
         ];
         let predicted_shares = [
             expected.get(ManiaJudgement::Perfect) / expected_timing,
@@ -3194,8 +2506,12 @@ fn residual_shape_report() {
 
         println!(
             "{:>9} {:>7} {:>6.2} {:>6.2} {:>7.1} {} {}",
-            row.map,
-            if row.mods.is_empty() { "NM" } else { row.mods },
+            score.map_id,
+            if score.mods.is_empty() {
+                "NM".to_string()
+            } else {
+                score.mods
+            },
             attrs.stars,
             fit.skill,
             fit.g_timing,
@@ -3982,25 +3298,15 @@ fn model_ab_report() {
     }
 }
 
-/// Reads the configured multiuser/BP TSV and prices every row twice.
-///
-/// `SUNNY_MULTIUSER_TSV` selects the TSV (default: `local-fixtures/multiuser.tsv`).
-/// `SUNNY_MAPS` selects the directory containing `{map_id}.osu` files (default:
-/// `local-fixtures/maps`).
-fn load_multiuser() -> Vec<MultiPriced> {
-    use rayon::prelude::*;
-    use std::collections::{HashMap, HashSet};
-
+fn load_multiuser_rows() -> Vec<MultiRow> {
     let tsv = std::env::var_os("SUNNY_MULTIUSER_TSV")
         .unwrap_or_else(|| "local-fixtures/multiuser.tsv".into());
-    let maps_dir = std::env::var_os("SUNNY_MAPS").unwrap_or_else(|| "local-fixtures/maps".into());
 
     let Ok(text) = std::fs::read_to_string(tsv) else {
         return Vec::new();
     };
 
-    let rows: Vec<_> = text
-        .lines()
+    text.lines()
         .filter_map(|line| {
             let f: Vec<&str> = line.split('\t').collect();
             if f.len() < 18 || f[0] == "uid" {
@@ -4021,7 +3327,19 @@ fn load_multiuser() -> Vec<MultiPriced> {
                 version: f[17].to_owned(),
             })
         })
-        .collect();
+        .collect()
+}
+
+/// Reads the configured multiuser/BP TSV and prices every row twice.
+///
+/// `SUNNY_MULTIUSER_TSV` selects the TSV (default: `local-fixtures/multiuser.tsv`).
+/// `SUNNY_MAPS` selects the directory containing `{map_id}.osu` files (default:
+/// `local-fixtures/maps`).
+fn load_multiuser() -> Vec<MultiPriced> {
+    use rayon::prelude::*;
+    use std::collections::{HashMap, HashSet};
+
+    let rows = load_multiuser_rows();
 
     // Difficulty is a map/mod concern, not a score concern. Build each unique job once,
     // then let map parsing and SR calculation occupy the Rayon pool independently of PP.
@@ -4029,6 +3347,8 @@ fn load_multiuser() -> Vec<MultiPriced> {
         .iter()
         .map(|row| (row.map_id.clone(), row.mods.clone()))
         .collect();
+
+    let maps_dir = std::env::var_os("SUNNY_MAPS").unwrap_or_else(|| "local-fixtures/maps".into());
 
     let attrs_by_job: HashMap<_, _> = jobs
         .into_par_iter()

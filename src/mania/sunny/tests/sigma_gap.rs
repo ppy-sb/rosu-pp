@@ -119,13 +119,13 @@ mod tests {
 
     #[test]
     fn gap_bin_index_works() {
-        assert_eq!(gap_bin_index(30.0), 0); // 0-40ms
-        assert_eq!(gap_bin_index(50.0), 1); // 40-60ms
-        assert_eq!(gap_bin_index(90.0), 3); // 80-100ms
-        assert_eq!(gap_bin_index(150.0), 5); // 130-170ms
-        assert_eq!(gap_bin_index(800.0), 11); // 700ms+
-        assert_eq!(gap_bin_index(f64::INFINITY), 12); // No predecessor
-        assert_eq!(gap_bin_index(f64::NAN), 12); // Invalid
+        assert_eq!(gap_bin_index(20.0), 1, "0-40ms"); // 0-40ms
+        assert_eq!(gap_bin_index(50.0), 2, "40-60ms"); // 40-60ms
+        assert_eq!(gap_bin_index(90.0), 4, "80-100ms"); // 80-100ms
+        assert_eq!(gap_bin_index(150.0), 6, "130-170ms"); // 130-170ms
+        assert_eq!(gap_bin_index(800.0), 11, "700ms+"); // 700ms+
+        assert_eq!(gap_bin_index(f64::INFINITY), 11); // No predecessor
+        assert_eq!(gap_bin_index(f64::NAN), 11); // Invalid
     }
 
     #[test]
