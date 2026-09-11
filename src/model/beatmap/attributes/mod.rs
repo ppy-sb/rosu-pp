@@ -130,6 +130,7 @@ impl BeatmapAttributes {
     }
 
     /// Calculate the AR and OD hit windows.
+    #[inline]
     pub fn hit_windows(&self) -> HitWindows {
         let clock_rate = self.clock_rate;
 

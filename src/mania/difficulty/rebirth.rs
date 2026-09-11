@@ -4,8 +4,9 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use crate::{
-    Beatmap, Difficulty,
+    Beatmap, Difficulty, GameMods,
     mania::object::{ManiaObject, ObjectParams},
+    mania::sunny_windows::effective_windows,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -137,6 +138,7 @@ pub(super) fn calculate_params(difficulty: &Difficulty, map: &Beatmap) -> Rebirt
     let total_columns = map.cs.round_ties_even().max(1.0) as usize;
     let clock_rate = difficulty.get_clock_rate();
     let take = difficulty.get_passed_objects();
+    let classic = is_classic(difficulty);
     let mut params = ObjectParams::new(map);
     let objects = map
         .hit_objects
@@ -144,27 +146,56 @@ pub(super) fn calculate_params(difficulty: &Difficulty, map: &Beatmap) -> Rebirt
         .map(|h| ManiaObject::new(h, total_columns as f32, &mut params))
         .take(take);
 
-    calculate_params_for_objects(total_columns, map.od, clock_rate, is_classic(difficulty), objects)
+    calculate_params_for_objects(
+        total_columns,
+        map.od,
+        map.is_convert,
+        clock_rate,
+        classic,
+        difficulty.get_mods(),
+        objects,
+    )
 }
 
 pub(super) fn calculate_stars_for_objects(
     total_columns: usize,
     od: f32,
+    is_convert: bool,
     clock_rate: f64,
     classic: bool,
+    mods: &GameMods,
     objects: impl IntoIterator<Item = ManiaObject>,
 ) -> f64 {
-    calculate_params_for_objects(total_columns, od, clock_rate, classic, objects).sr
+    calculate_params_for_objects(
+        total_columns,
+        od,
+        is_convert,
+        clock_rate,
+        classic,
+        mods,
+        objects,
+    )
+    .sr
 }
 
 pub(super) fn calculate_params_for_objects(
     total_columns: usize,
     od: f32,
+    is_convert: bool,
     clock_rate: f64,
     classic: bool,
+    mods: &GameMods,
     objects: impl IntoIterator<Item = ManiaObject>,
 ) -> RebirthParams {
-    let Some(data) = prepare_data(total_columns, od, clock_rate, objects) else {
+    let Some(data) = prepare_data(
+        total_columns,
+        od,
+        is_convert,
+        clock_rate,
+        classic,
+        mods,
+        objects,
+    ) else {
         return RebirthParams::default();
     };
 
@@ -181,7 +212,10 @@ fn is_classic(difficulty: &Difficulty) -> bool {
 fn prepare_data(
     total_columns: usize,
     od: f32,
+    is_convert: bool,
     clock_rate: f64,
+    classic: bool,
+    mods: &GameMods,
     objects: impl IntoIterator<Item = ManiaObject>,
 ) -> Option<RebirthData> {
     let mut notes = build_notes(clock_rate, objects);
@@ -214,9 +248,12 @@ fn prepare_data(
         + 1.0;
     let (all_corners, base_corners, awkwardness_corners) = get_corners(t_end, &notes);
 
+    let windows = effective_windows(f64::from(od), is_convert, mods, clock_rate, classic);
+    let great_window = windows.great;
+
     Some(RebirthData {
         total_columns,
-        hit_leniency: hit_leniency(f64::from(od)),
+        hit_leniency: hit_leniency_from_window(great_window),
         t_end,
         notes,
         notes_by_column,
@@ -251,8 +288,10 @@ fn compare_notes(a: &Note, b: &Note) -> Ordering {
         .then_with(|| a.column.cmp(&b.column))
 }
 
-fn hit_leniency(od: f64) -> f64 {
-    let x = 0.3 * ((64.5 - (od * 3.0).ceil()) / 500.0).sqrt();
+/// Convert a GREAT hit window to hit leniency.
+/// This is the same formula used in sunny_windows.rs.
+fn hit_leniency_from_window(great_window: f64) -> f64 {
+    let x = 0.3 * (great_window / 500.0).sqrt();
     x.min(0.6 * (x - 0.09) + 0.09)
 }
 
@@ -865,7 +904,11 @@ fn calculate_from_data(data: RebirthData, classic: bool) -> RebirthParams {
     let effective_weights: Vec<_> = if classic {
         density.iter().zip(gaps).map(|(&c, gap)| c * gap).collect()
     } else {
-        density_v2.iter().zip(gaps).map(|(&c, gap)| c * gap).collect()
+        density_v2
+            .iter()
+            .zip(gaps)
+            .map(|(&c, gap)| c * gap)
+            .collect()
     };
     let mut sorted_indices: Vec<_> = (0..d_all.len()).collect();
     sorted_indices.sort_by(|&a, &b| d_all[a].total_cmp(&d_all[b]));
@@ -933,7 +976,12 @@ fn calculate_from_data(data: RebirthData, classic: bool) -> RebirthParams {
 
 /// Spikiness measure from the weighted variance of the corner difficulty
 /// values, i.e. how much the difficulty spikes within the map.
-fn compute_spikiness(d_sorted: &[f64], w_sorted: &[f64], weighted_mean: f64, total_weight: f64) -> f64 {
+fn compute_spikiness(
+    d_sorted: &[f64],
+    w_sorted: &[f64],
+    weighted_mean: f64,
+    total_weight: f64,
+) -> f64 {
     // Degenerate cases where the reference implementation would produce NaN
     if weighted_mean == 0.0 || total_weight <= 0.0 {
         return 0.0;
@@ -959,7 +1007,10 @@ fn compute_switches(data: &RebirthData, ks_arr: &[f64], d_all: &[f64]) -> f64 {
     let heads: Vec<f64> = data.notes.iter().map(|note| note.head).collect();
 
     // For each head, the index of the first corner >= head (last index dropped)
-    let idx_list: Vec<usize> = heads.iter().map(|&head| lower_bound(all_corners, head)).collect();
+    let idx_list: Vec<usize> = heads
+        .iter()
+        .map(|&head| lower_bound(all_corners, head))
+        .collect();
     let n = idx_list.len().saturating_sub(1);
 
     let ks_at_note: Vec<f64> = idx_list[..n].iter().map(|&i| ks_arr[i]).collect();
@@ -1004,12 +1055,20 @@ fn compute_switches(data: &RebirthData, ks_arr: &[f64], d_all: &[f64]) -> f64 {
     let mut num_tail_gaps = 0;
 
     if tails.len() > 1 && tails[tails.len() - 1] > tails[0] {
-        let idx_list_tails: Vec<usize> =
-            tails.iter().map(|&tail| lower_bound(all_corners, tail)).collect();
+        let idx_list_tails: Vec<usize> = tails
+            .iter()
+            .map(|&tail| lower_bound(all_corners, tail))
+            .collect();
         let n_tails = idx_list_tails.len() - 1;
 
-        let ks_at_tail: Vec<f64> = idx_list_tails[..n_tails].iter().map(|&i| ks_arr[i]).collect();
-        let weights_at_tail: Vec<f64> = idx_list_tails[..n_tails].iter().map(|&i| d_all[i]).collect();
+        let ks_at_tail: Vec<f64> = idx_list_tails[..n_tails]
+            .iter()
+            .map(|&i| ks_arr[i])
+            .collect();
+        let weights_at_tail: Vec<f64> = idx_list_tails[..n_tails]
+            .iter()
+            .map(|&i| d_all[i])
+            .collect();
 
         let tail_gaps: Vec<f64> = tails.windows(2).map(|w| w[1] - w[0]).collect();
         let num_tail_gaps_tmp = tail_gaps.len();
@@ -1078,7 +1137,11 @@ fn compute_variety(data: &RebirthData) -> f64 {
     let mut head_gaps_new = Vec::new();
 
     for column in &data.notes_by_column {
-        head_gaps_new.extend(column.windows(2).map(|w| w[1].head as i64 - w[0].head as i64));
+        head_gaps_new.extend(
+            column
+                .windows(2)
+                .map(|w| w[1].head as i64 - w[0].head as i64),
+        );
     }
 
     let col_variety = 2.5 * rao_quadratic_entropy_log(&head_gaps_new, 2);
@@ -1196,7 +1259,12 @@ mod tests {
 
     #[test]
     fn hit_leniency_matches_reference_formula() {
-        assert!((hit_leniency(8.0) - 0.08538149682454625).abs() < 1e-12);
+        // OD 8, classic non-convert, no mods, clock_rate 1.0
+        // Expected GREAT window: 34 + 3 * (10 - 8) = 40, after quantization: 40.5
+        let expected_great_window = 40.5;
+        assert!(
+            (hit_leniency_from_window(expected_great_window) - 0.08538149682454625).abs() < 1e-12
+        );
     }
 
     #[test]

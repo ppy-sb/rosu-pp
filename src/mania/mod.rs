@@ -24,6 +24,7 @@ mod object;
 mod performance;
 mod score_state;
 mod strains;
+pub mod sunny_windows;
 
 /// Marker type for [`GameMode::Mania`].
 ///
