@@ -289,7 +289,7 @@ fn compare_notes(a: &Note, b: &Note) -> Ordering {
 }
 
 /// Convert a GREAT hit window to hit leniency.
-/// This is the same formula used in sunny.rs.
+/// This is the same formula used in sunny_windows.rs.
 fn hit_leniency_from_window(great_window: f64) -> f64 {
     let x = 0.3 * (great_window / 500.0).sqrt();
     x.min(0.6 * (x - 0.09) + 0.09)

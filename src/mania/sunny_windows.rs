@@ -1,6 +1,6 @@
 //! Full judgement window set for osu!mania.
 //!
-//! [`crate::mania::sunny`] only ever computed the GREAT window, which is also all that
+//! The rebirth difficulty calculation only ever computed the GREAT window, which is also all that
 //! rosu-pp exposes for mania (`od_ok` and `od_meh` are always `None`). Modelling
 //! how hard a given judgement is to hit needs every window, so they are built
 //! here.
@@ -206,9 +206,9 @@ fn difficulty_range(od: f64, range: &Range) -> f64 {
 
 /// Build the full window set for a (converted) mania beatmap.
 ///
-/// `classic` selects the osu!stable judgement scheme and should come from
-/// [`crate::mania::sunny::is_classic`], so that the windows agree with the difficulty
-/// calculation's notion of which scoring mode is in effect.
+/// `classic` selects the osu!stable judgement scheme and should come from the
+/// difficulty calculation's `is_classic`, so that the windows agree with the
+/// difficulty calculation's notion of which scoring mode is in effect.
 pub fn hit_windows(
     map: &Beatmap,
     mods: &GameMods,
