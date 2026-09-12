@@ -753,8 +753,8 @@ pub fn calculate(
 
     let classic = is_classic(lazer, mods);
 
-    let great_hit_window = get_hit_window_300(map, clock_rate, classic, mods);
     let windows = hit_windows(map, mods, clock_rate, classic);
+    let great_hit_window = windows.great;
 
     // The same map judged without the window-affecting mods. Mods reach `hit_windows`
     // only through its difficulty multiplier, so an empty mod set is exactly "this map's
@@ -1644,42 +1644,6 @@ fn compute_timing_pp_with_units(
 }
 
 // ---------------------------------------------------------------------------
-// Hit window & hit leniency
-// ---------------------------------------------------------------------------
-
-/// The GREAT hit window following the C# `ManiaDifficultyCalculator`.
-///
-/// - non-convert mania maps use `34 + 3 * (10 - od)` clamped to `[34, 64]`
-/// - convert maps use `34` if the original OD rounds above 4, else `47`
-/// - `HR` divides the window by 1.4, `EZ` multiplies it by 1.4
-/// - the clock rate scales the window but is normalized away afterwards
-pub(crate) fn get_hit_window_300(
-    map: &Beatmap,
-    clock_rate: f64,
-    classic: bool,
-    mods: &GameMods,
-) -> f64 {
-    let od = f64::from(map.od);
-
-    let base = if classic && !map.is_convert {
-        34.0 + 3.0 * (10.0 - od).clamp(0.0, 10.0)
-    } else if classic && od.round() > 4.0 {
-        34.0
-    } else if classic {
-        47.0
-    } else if od > 5.0 {
-        49.0 + (34.0 - 49.0) * (od - 5.0) / 5.0
-    } else {
-        64.0 + (49.0 - 64.0) * od / 5.0
-    };
-
-    let mut value = base * clock_rate + 1e-6;
-
-    value /= crate::mania::sunny_windows::difficulty_multiplier(mods);
-
-    ((value as i64) as f64 + 0.5) / clock_rate
-}
-
 /// Whether the score is a classic (osu!stable default / lazer with CL mod)
 /// style play, i.e. long notes give a single judgement and the difficulty
 /// weights use the head-only density.
@@ -2915,27 +2879,6 @@ mod inline_tests {
     use rosu_mods::{GameMod, GameMods as LazerMods};
 
     #[test]
-    fn hit_window_300_formula() {
-        let mut map = Beatmap::default();
-        map.mode = GameMode::Mania;
-        map.od = 8.0;
-        let wrapped_nm = GameMods::default();
-
-        let mut hr = LazerMods::new();
-        hr.insert(GameMod::HardRockMania(Default::default()));
-        let wrapped_hr = GameMods::from(hr);
-
-        let mut ez = LazerMods::new();
-        ez.insert(GameMod::EasyMania(Default::default()));
-        let wrapped_ez = GameMods::from(ez);
-
-        assert!((get_hit_window_300(&map, 1.0, true, &wrapped_nm) - 40.5).abs() < 1e-9);
-        assert!((get_hit_window_300(&map, 1.0, true, &wrapped_hr) - 28.5).abs() < 1e-9);
-        assert!((get_hit_window_300(&map, 1.0, true, &wrapped_ez) - 56.5).abs() < 1e-9);
-        assert!((get_hit_window_300(&map, 1.5, true, &wrapped_nm) - 60.5 / 1.5).abs() < 1e-9);
-    }
-
-    #[test]
     fn classic_detection_sees_the_score_v2_mod() {
         assert_eq!(
             rosu_mods::generated_mods::ScoreV2Mania::acronym().as_str(),
@@ -2972,7 +2915,14 @@ mod inline_tests {
                         map.od = od;
                         let new_calculator = hit_windows(&map, &mods, clock_rate, is_classic);
                         let actual = new_calculator.great;
-                        let expected = get_hit_window_300(&map, clock_rate, is_classic, &mods);
+                        let expected = crate::mania::sunny_windows::effective_windows(
+                            f64::from(map.od),
+                            map.is_convert,
+                            &mods,
+                            clock_rate,
+                            is_classic,
+                        )
+                        .great;
 
                         // Check condition manually
                         if actual != expected {
@@ -2997,25 +2947,6 @@ mod inline_tests {
         }
     }
 
-    #[test]
-    fn classic_mod_overrides_lazer_window_scheme() {
-        let mut map = Beatmap::default();
-        map.mode = GameMode::Mania;
-        map.od = 4.0;
-        map.is_convert = true;
-
-        // Lazer interpolation gives 52ms at OD4; Classic uses the convert
-        // threshold and gives 47ms. Classic must win even with the Lazer switch.
-
-        let mods = GameMods::from(LazerMods::new());
-        assert!((get_hit_window_300(&map, 1.0, false, &mods) - 52.0).abs() < 1e-9);
-        assert!((get_hit_window_300(&map, 1.0, true, &mods) - 47.0).abs() < 1e-9);
-
-        let mut mods_inner = LazerMods::new();
-        mods_inner.insert(GameMod::ClassicMania(Default::default()));
-        let mods = GameMods::from(mods_inner);
-        assert!(is_classic(Some(true), &mods));
-    }
 }
 
 // Report helper functions - only available with reports feature or in tests

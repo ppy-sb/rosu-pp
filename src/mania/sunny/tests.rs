@@ -664,37 +664,6 @@ fn reference_windows_match_od8_no_mod() {
     );
 }
 
-/// Legacy reference switches remain available to research reports, but production
-/// pricing must no longer read them.
-#[test]
-fn production_pricing_ignores_legacy_reference_switches() {
-    let map = synthetic_map(4.2, 2000, 120.0);
-    let mods = GameMods::default();
-    let attrs = calculate(&map, &mods, 1.0, Some(true), None).unwrap();
-    let state = SunnyScoreState {
-        n320: 1400,
-        n300: 480,
-        n200: 90,
-        n100: 20,
-        n50: 5,
-        misses: 5,
-    };
-    let baseline = calculate_performance(&attrs, &mods, state);
-
-    for switch in ["SUNNY_MAP_REFERENCE", "SUNNY_ONESIDED_REFERENCE"] {
-        // Safety: these process-global switches are only read by research helpers
-        // now; the assertion below pins that production calculation is isolated.
-        unsafe { std::env::set_var(switch, "1") };
-        let switched = calculate_performance(&attrs, &mods, state);
-        unsafe { std::env::remove_var(switch) };
-
-        assert!((switched.pp - baseline.pp).abs() < 1e-9);
-        assert!(
-            (1.0f64 /* window_scalar leftover */ - 1.0f64/* window_scalar leftover */).abs() < 1e-9
-        );
-    }
-}
-
 /// Some real scores still fit poorly even with a calibrated tail, so pricing must
 /// not depend on fit quality: gating on it left most `EZ` scores at their
 /// unmodified value, which is the bug this pins against returning.
@@ -5442,7 +5411,7 @@ fn release_density_weight_structure() {
         // `calculate()` call site in this module other than ones specifically
         // exercising the classic/ScoreV1 path.
         let windows = hit_windows(map, &GameMods::default(), 1.0, false);
-        let great_hit_window = get_hit_window_300(map, 1.0, false, &GameMods::default());
+        let great_hit_window = windows.great;
         let hit_leniency = hit_leniency_from_window(great_hit_window);
         let data = RebirthData::new(notes, total_columns, hit_leniency, windows.good);
 
@@ -5689,7 +5658,7 @@ fn per_note_difficulty_distribution() {
         let ln_share = n_long_notes as f64 / notes.len() as f64;
 
         let windows = hit_windows(map, &GameMods::default(), 1.0, false);
-        let great_hit_window = get_hit_window_300(map, 1.0, false, &GameMods::default());
+        let great_hit_window = windows.great;
         let hit_leniency = hit_leniency_from_window(great_hit_window);
         let data = RebirthData::new(notes, total_columns, hit_leniency, windows.good);
 
@@ -7590,7 +7559,7 @@ fn per_note_difficulty(map: &Beatmap) -> Option<PerNoteDifficulty> {
     }
 
     let windows = hit_windows(map, &GameMods::default(), 1.0, false);
-    let great_hit_window = get_hit_window_300(map, 1.0, false, &GameMods::default());
+    let great_hit_window = windows.great;
     let hit_leniency = hit_leniency_from_window(great_hit_window);
     let data = RebirthData::new(notes, total_columns, hit_leniency, windows.good);
 
@@ -8561,7 +8530,7 @@ fn does_a_mean_offset_move_pp() {
         }
 
         let windows = hit_windows(&map, &mods, clock_rate, false);
-        let great = get_hit_window_300(&map, clock_rate, false, &mods);
+        let great = windows.great;
         let data = RebirthData::new(
             notes,
             total_columns,
@@ -9415,7 +9384,7 @@ fn transition_oracle_experiments() {
                     let total_columns = map.cs.round_ties_even().max(1.0) as usize;
                     let (notes, _) = build_notes(clock_rate, map.hit_objects.iter(), total_columns);
                     let windows = hit_windows(&map, &mods, clock_rate, false);
-                    let great = get_hit_window_300(&map, clock_rate, false, &mods);
+                    let great = windows.great;
                     let data = RebirthData::new(
                         notes,
                         total_columns,

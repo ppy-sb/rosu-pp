@@ -194,6 +194,7 @@ const LAZER_MISS: Range = Range {
 /// Linear interpolation over OD, matching lazer's
 /// `IBeatmapDifficultyInfo.DifficultyRange`: OD 0-5 interpolates between `od0`
 /// and `od5`, OD 5-10 between `od5` and `od10`.
+#[inline]
 fn difficulty_range(od: f64, range: &Range) -> f64 {
     if od > 5.0 {
         range.od5 + (range.od10 - range.od5) * (od - 5.0) / 5.0
@@ -211,6 +212,7 @@ fn difficulty_range(od: f64, range: &Range) -> f64 {
 /// `classic` selects the osu!stable judgement scheme and should come from
 /// [`crate::mania::sunny::is_classic`], so that the windows agree with the difficulty
 /// calculation's notion of which scoring mode is in effect.
+#[inline]
 pub fn hit_windows(
     map: &Beatmap,
     mods: &GameMods,
@@ -228,6 +230,7 @@ pub fn hit_windows(
 }
 
 /// Build effective Mania hit windows from difficulty state without requiring a beatmap.
+#[inline]
 pub fn effective_windows(
     od: f64,
     is_convert: bool,
@@ -239,6 +242,7 @@ pub fn effective_windows(
     effective_windows_with_multiplier(od, is_convert, multiplier, clock_rate, classic)
 }
 
+#[inline]
 fn effective_windows_with_multiplier(
     od: f64,
     is_convert: bool,
@@ -256,6 +260,7 @@ fn effective_windows_with_multiplier(
 }
 
 /// The lazer scheme: every window interpolates over OD.
+#[inline]
 fn lazer_windows(od: f64) -> ManiaHitWindows {
     ManiaHitWindows {
         perfect: difficulty_range(od, &LAZER_PERFECT),
@@ -273,6 +278,7 @@ fn lazer_windows(od: f64) -> ManiaHitWindows {
 /// `round(od) > 4`. PERFECT is a flat 16ms in both cases and does *not* scale
 /// with OD at all — the detail that makes `EZ`'s uniform widening so valuable,
 /// since it is the only way the PERFECT window ever moves.
+#[inline]
 fn classic_windows(od: f64, is_convert: bool) -> ManiaHitWindows {
     if is_convert {
         if od.round_ties_even() > 4.0 {
@@ -313,6 +319,7 @@ fn classic_windows(od: f64, is_convert: bool) -> ManiaHitWindows {
 /// Mania is unusual here: neither mod touches OD. `HR` sets
 /// `DifficultyMultiplier = 1.4` and `EZ` sets `1 / 1.4`, applied to every
 /// window. Since lazer divides by this multiplier, `HR` narrows and `EZ` widens.
+#[inline]
 pub(crate) fn difficulty_multiplier(mods: &GameMods) -> f64 {
     if mods.hr() {
         1.4
@@ -329,6 +336,7 @@ pub(crate) fn difficulty_multiplier(mods: &GameMods) -> f64 {
 /// `totalMultiplier = speed / difficulty`, then divides the clock rate back out
 /// so the result is comparable across rates. The floor models osu!'s 1ms input
 /// granularity.
+#[inline]
 fn finalize(raw: ManiaHitWindows, multiplier: f64, clock_rate: f64) -> ManiaHitWindows {
     let apply = |value: f64| {
         let scaled = value / multiplier * clock_rate;
