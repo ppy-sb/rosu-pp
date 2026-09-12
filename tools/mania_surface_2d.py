@@ -264,7 +264,7 @@ def panel_bands(ax, difficulty: float, fit_sigma: float | None) -> None:
     legend(ax, loc="center left", ncol=2)
 
 
-def panel_windows(ax, target: float | None) -> None:
+def panel_windows(ax, core_sigma: float | None, target: float | None) -> None:
     rows = read("windows.csv")
     series: dict[str, tuple[list[float], list[float]]] = defaultdict(lambda: ([], []))
     greats: dict[str, float] = {}
@@ -296,8 +296,13 @@ def panel_windows(ax, target: float | None) -> None:
 
     ax.set_xscale("log")
     ax.set_xlim(min(all_sigmas), max(all_sigmas))
-    ax.set_ylim(0.4, 1.005)
+    # Below 70% accuracy the current pp model has no meaningful score value;
+    # spend the vertical resolution on the useful range.
+    ax.set_ylim(0.7, 1.005)
     plain_log(ax, "x", all_sigmas)
+
+    if core_sigma:
+        ax.axvline(core_sigma, color="#ffffff", ls="--", lw=1.0, alpha=0.6)
     legend(ax, loc="lower left")
 
     # A horizontal read at one accuracy is exactly what `window_scalar` computes.
@@ -560,8 +565,9 @@ def main() -> None:
     figure = plt.figure(figsize=(16, 14), facecolor=PAPER)
     grid = figure.add_gridspec(2, 2, height_ratios=[1.15, 1.72], hspace=0.34, wspace=0.20)
 
-    panel_bands(figure.add_subplot(grid[0, 0]), difficulty, args.fit_sigma)
-    panel_windows(figure.add_subplot(grid[0, 1]), args.target_accuracy)
+    picked_sigma = dumped_core_sigma
+    panel_bands(figure.add_subplot(grid[0, 0]), difficulty, picked_sigma)
+    panel_windows(figure.add_subplot(grid[0, 1]), picked_sigma, args.target_accuracy)
     instrument = grid[1, :].subgridspec(2, 1, height_ratios=[2.1, 1.0], hspace=0.0)
     composition_ax = figure.add_subplot(instrument[0, 0])
     balance_ax = figure.add_subplot(instrument[1, 0], sharex=composition_ax)
@@ -575,7 +581,8 @@ def main() -> None:
     balance_ax.yaxis.grid(False)
 
     figure.suptitle(
-        f"osu!mania hit result surface  —  {source}  —  {difficulty:.2f} stars",
+        f"osu!mania hit result surface  —  {source}  —  {difficulty:.2f} stars"
+        f"  —  sigma {picked_sigma:.2f} ms",
         color=FG,
         fontsize=14,
         y=0.965,

@@ -2,8 +2,8 @@ use clap::Parser;
 use rosu_mods::GameMod;
 use rosu_pp::mania::sunny::{judgement_units, per_note_difficulty};
 use rosu_pp::mania::sunny_accuracy::{
-    ErrorModel, JudgementUnit, TIMING_BASELINE_SIGMA, expected_counts_at_core_sigma,
-    ln_sigma_scale_for_duration, sigma_scale_from_difficulty_ratio,
+    expected_counts_at_core_sigma, ln_sigma_scale_for_duration, sigma_scale_from_difficulty_ratio,
+    ErrorModel, JudgementUnit, TIMING_BASELINE_SIGMA,
 };
 use rosu_pp::mania::sunny_windows::{ManiaHitWindows, ManiaJudgement};
 use rosu_pp::report_utils::{calculate, parse, single_mod};
@@ -129,10 +129,17 @@ fn main() {
         .as_ref()
         .map(|(_, _, attrs)| judgement_units(attrs, 1.0, &model, true))
         .unwrap_or_else(|| vec![JudgementUnit::new(map_difficulty)]);
+    // Match the sigma used by Sunny's pp calculation for this map. The CLI
+    // override remains useful for inspecting alternate player spreads.
+    let default_sigma = map_slice
+        .as_ref()
+        .map_or(TIMING_BASELINE_SIGMA, |(_, _, attrs)| {
+            attrs.base_timing_sigma
+        });
     let core_sigma = args
         .core_sigma
         .filter(|sigma| sigma.is_finite() && *sigma > 0.0)
-        .unwrap_or(TIMING_BASELINE_SIGMA);
+        .unwrap_or(default_sigma);
 
     std::fs::write(
         dir.join("surface_2d_meta.csv"),
@@ -142,6 +149,8 @@ fn main() {
         ),
     )
     .unwrap();
+
+    println!("core sigma: {core_sigma:.3} ms (default: {default_sigma:.3} ms)");
 
     if let Some((_, _, attrs)) = map_slice.as_ref() {
         if let Some(bins) = attrs.input_state_bins {
