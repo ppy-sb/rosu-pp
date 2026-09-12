@@ -5,19 +5,15 @@
 use clap::{Parser, ValueEnum};
 use comfy_table::{Cell, CellAlignment, Color, ContentArrangement, Table};
 use rayon::prelude::*;
-use rosu_mods::GameMod;
-use rosu_pp::GameMods;
 use rosu_pp::mania::sunny::{
     SunnyManiaDifficultyAttributes, SunnyManiaPerformanceAttributes, SunnyScoreState,
     calculate_performance,
 };
 use rosu_pp::model::beatmap::Beatmap;
-use rosu_pp::report_utils::{calculate, parse};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use rosu_pp::report_utils::{BatchCalculator, batch, calculate, mods_for};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-type LazerMods = rosu_mods::GameMods;
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 #[value(rename_all = "lower")]
@@ -65,6 +61,41 @@ struct LoadedUser {
     attrs: Arc<SunnyManiaDifficultyAttributes>,
 }
 
+struct Calculator {
+    maps_dir: PathBuf,
+}
+
+impl BatchCalculator<MultiRow> for Calculator {
+    type Attributes = SunnyManiaDifficultyAttributes;
+    type Map = Beatmap;
+    type MapKey = String;
+    type ModKey = String;
+
+    fn map_key(&self, row: &MultiRow) -> Self::MapKey {
+        row.map_id.clone()
+    }
+
+    fn mod_key(&self, row: &MultiRow) -> Self::ModKey {
+        row.mods.clone()
+    }
+
+    fn load_map(&self, map_id: &Self::MapKey) -> Option<Self::Map> {
+        let bytes = std::fs::read(self.maps_dir.join(format!("{map_id}.osu"))).ok()?;
+        Beatmap::from_bytes(&bytes).ok()
+    }
+
+    fn calculate(&self, map: &Self::Map, mod_names: &Self::ModKey) -> Option<Self::Attributes> {
+        let (mods, clock_rate) = mods_for(mod_names);
+        calculate(
+            map,
+            &mods,
+            clock_rate,
+            Some(!mod_names.contains("V2")),
+            None,
+        )
+    }
+}
+
 struct MultiPriced {
     row: MultiRow,
     map: Arc<Beatmap>,
@@ -100,30 +131,6 @@ struct ScoreRow {
     loss_d: String,
 }
 
-fn mods_for(names: &str) -> (GameMods, f64) {
-    let mut mods = LazerMods::new();
-    if names.contains("V2") {
-        mods.insert(GameMod::ScoreV2Mania(Default::default()));
-    }
-    if names.contains("EZ") {
-        mods.insert(GameMod::EasyMania(Default::default()));
-    }
-    if names.contains("HR") {
-        mods.insert(GameMod::HardRockMania(Default::default()));
-    }
-    if names.contains("NF") {
-        mods.insert(GameMod::NoFailMania(Default::default()));
-    }
-    let clock_rate = if names.contains("DT") || names.contains("NC") {
-        1.5
-    } else if names.contains("HT") {
-        0.75
-    } else {
-        1.0
-    };
-    (GameMods::from(mods), clock_rate)
-}
-
 /// Loads users and calculates map-level attributes, batching identical map/mod jobs.
 fn load_user(tsv_path: &Path, maps_dir: &Path) -> Vec<LoadedUser> {
     let Ok(text) = std::fs::read_to_string(tsv_path) else {
@@ -153,35 +160,25 @@ fn load_user(tsv_path: &Path, maps_dir: &Path) -> Vec<LoadedUser> {
             })
         })
         .collect();
-    let jobs: HashSet<_> = rows
-        .iter()
-        .map(|r| (r.map_id.clone(), r.mods.clone()))
-        .collect();
-    let attrs_by_job: HashMap<_, _> = jobs
-        .into_par_iter()
-        .filter_map(|(map_id, mod_names)| {
-            let map = parse(&maps_dir.join(format!("{map_id}.osu")).to_string_lossy())?;
-            let (mods, clock_rate) = mods_for(&mod_names);
-            let attrs = calculate(
-                &map,
-                &mods,
-                clock_rate,
-                Some(!mod_names.contains("V2")),
-                None,
-            )?;
-            Some(((map_id, mod_names), (Arc::new(map), Arc::new(attrs))))
-        })
-        .collect();
-    rows.into_iter()
-        .filter_map(|row| {
-            let (map, attrs) = attrs_by_job.get(&(row.map_id.clone(), row.mods.clone()))?;
-            Some(LoadedUser {
-                row,
-                map: Arc::clone(map),
-                attrs: Arc::clone(attrs),
-            })
-        })
-        .collect()
+    batch(
+        rows,
+        Calculator {
+            maps_dir: maps_dir.to_path_buf(),
+        },
+        |(map, _, attrs, rows)| {
+            Some(
+                rows.into_iter()
+                    .map(|row| LoadedUser {
+                        row,
+                        map: Arc::clone(&map),
+                        attrs: Arc::clone(&attrs),
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        },
+    )
+    .flatten()
+    .collect()
 }
 
 /// Calculates performance for all loaded users in parallel.

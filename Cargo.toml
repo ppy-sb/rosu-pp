@@ -44,6 +44,10 @@ name = "multiuser_report"
 required-features = ["reports"]
 
 [[bin]]
+name = "batch"
+required-features = ["reports"]
+
+[[bin]]
 name = "surface_dump"
 required-features = ["reports"]
 
